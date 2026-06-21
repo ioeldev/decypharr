@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -410,9 +411,17 @@ func (s *Server) handleTorrentDownload(w http.ResponseWriter, r *http.Request, e
 		return
 	}
 
-	w.Header().Set("X-Accel-Redirect", link.DownloadLink)
 	w.Header().Set("X-Accel-Buffering", "no")
-	http.Redirect(w, r, link.DownloadLink, http.StatusFound)
+
+	// Debrid providers can return links whose path still contains raw, unencoded
+	// characters (e.g. a literal space when the filename has one). http.Redirect
+	// writes the Location header verbatim, producing an invalid URI that browsers
+	// reject with ERR_INVALID_RESPONSE. Re-encode the link so Location is valid.
+	downloadLink := link.DownloadLink
+	if parsed, parseErr := url.Parse(downloadLink); parseErr == nil {
+		downloadLink = parsed.String()
+	}
+	http.Redirect(w, r, downloadLink, http.StatusFound)
 }
 
 func (s *Server) handleUsenetDownload(w http.ResponseWriter, r *http.Request, entryName string, file *storage.File) {
