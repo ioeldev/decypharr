@@ -265,10 +265,22 @@ class FileBrowser {
         }
     }
 
+    // Health is tracked per torrent entry (folder), never per file. For a file
+    // row, resolve the parent torrent name from its path so health/recheck hit
+    // the correct entry instead of the file name (which is not an entry).
+    healthEntryName(entry) {
+        if (!entry) return '';
+        if (entry.is_dir) return entry.name;
+        const parts = (entry.path || '').split('/').filter(p => p);
+        if (parts.length >= 2) return parts[parts.length - 2];
+        return entry.name;
+    }
+
     async loadHealthForEntries() {
         const names = Array.from(new Set(this.state.entries
             .filter((e) => e && e.name)
-            .map((e) => e.name)));
+            .map((e) => this.healthEntryName(e))
+            .filter(Boolean)));
         if (names.length === 0) return;
         const results = await Promise.all(names.map(async (name) => {
             try {
@@ -402,8 +414,8 @@ class FileBrowser {
                     <td>
                         ${entry.active_debrid ? `<span>${this.escapeHtml(entry.active_debrid)}</span>` : '-'}
                     </td>
-                    <td data-health-cell="${this.escapeAttr(entry.name)}">
-                        ${this.healthBadge(this.state.health.get(entry.name))}
+                    <td data-health-cell="${this.escapeAttr(this.healthEntryName(entry))}">
+                        ${this.healthBadge(this.state.health.get(this.healthEntryName(entry)))}
                     </td>
                     <td onclick="event.stopPropagation();">
                         <div class="dropdown dropdown-end">
@@ -416,7 +428,7 @@ class FileBrowser {
                                         <i class="bi bi-download"></i> Download
                                     </a></li>
                                 ` : ''}
-                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}')">
+                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(this.healthEntryName(entry))}')">
                                     <i class="bi bi-search-heart"></i> Recheck health
                                 </a></li>
                                 ${entry.can_delete ? `
