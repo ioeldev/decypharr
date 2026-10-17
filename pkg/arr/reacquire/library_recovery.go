@@ -37,7 +37,7 @@ func (s *Service) ReacquireLibraryFile(ctx context.Context, request LibraryReque
 		if !binding.AuthorizesMutation() || !sameLibraryPath(binding.LibraryPath, request.LibraryPath) {
 			return nil, ErrBindingUnsafe
 		}
-		return s.enqueue(Request{EntryID: binding.EntryID, FileID: binding.EntryFileID,
+		return s.enqueueLibrary(Request{EntryID: binding.EntryID, FileID: binding.EntryFileID,
 			Cause: request.Cause, Strategy: StrategyHistoryFailed}, binding)
 	}
 	fileID := strconv.Itoa(request.ArrFileID)
@@ -69,7 +69,7 @@ func (s *Service) ReacquireLibraryFile(ctx context.Context, request LibraryReque
 	if err := validateSearchBindings(instance, []Binding{binding}); err != nil {
 		return nil, err
 	}
-	return s.enqueue(Request{EntryID: entryID, FileID: fileID, Cause: request.Cause, Strategy: StrategyCommandSearch}, binding)
+	return s.enqueueLibrary(Request{EntryID: entryID, FileID: fileID, Cause: request.Cause, Strategy: StrategyCommandSearch}, binding)
 }
 
 // reconcileImportedJobs uses Arr file IDs to confirm every replacement.
@@ -80,78 +80,80 @@ func (s *Service) reconcileImportedJobs(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, executionTimeout)
 	defer cancel()
-	type mediaKey struct {
-		arrName     string
-		fingerprint string
-		mediaID     int
-	}
-	type mediaResult struct {
-		files []arr.LibraryFile
-		err   error
-	}
-	checked := make(map[mediaKey]mediaResult)
-	for _, job := range s.Jobs() {
+	for _, job := range s.observationJobs() {
 		if ctx.Err() != nil {
 			return
 		}
-		if !job.Status.waiting() || len(job.Bindings) == 0 {
+		ready, err := s.jobImported(ctx, job)
+		if err != nil {
+			s.recordObservationError(job, err)
 			continue
-		}
-		instance, ok := s.arrs.Get(job.ArrName)
-		if !ok {
-			continue
-		}
-		fingerprint := instance.Fingerprint()
-		oldFiles := make(map[int]struct{}, len(job.Bindings))
-		for _, binding := range job.Bindings {
-			oldFiles[binding.ArrFileID] = struct{}{}
-		}
-		ready := true
-		for _, binding := range job.Bindings {
-			if !binding.AuthorizesMutation() || binding.ArrName != instance.Name || binding.ArrType != instance.Type || binding.ArrInstanceFingerprint != fingerprint {
-				ready = false
-				break
-			}
-			mediaID := binding.MovieID
-			if instance.Type == arr.Sonarr {
-				mediaID = binding.SeriesID
-			}
-			if mediaID <= 0 {
-				ready = false
-				break
-			}
-			key := mediaKey{arrName: instance.Name, fingerprint: fingerprint, mediaID: mediaID}
-			result, exists := checked[key]
-			if !exists {
-				result.files, result.err = s.arrs.LibraryFilesForMedia(ctx, instance.Name, []int{mediaID})
-				checked[key] = result
-			}
-			if result.err != nil {
-				ready = false
-				break
-			}
-			remaining := slices.Clone(binding.EpisodeIDs)
-			replaced := false
-			for _, file := range result.files {
-				if _, old := oldFiles[file.ArrFileID]; old || file.ArrFileID <= 0 || file.Path == "" {
-					continue
-				}
-				if instance.Type == arr.Radarr && file.MovieID == binding.MovieID {
-					replaced = true
-					break
-				}
-				if instance.Type == arr.Sonarr && file.SeriesID == binding.SeriesID {
-					remaining = slices.DeleteFunc(remaining, func(id int) bool { return slices.Contains(file.EpisodeIDs, id) })
-					replaced = len(binding.EpisodeIDs) > 0 && len(remaining) == 0
-				}
-			}
-			if !replaced {
-				ready = false
-				break
-			}
 		}
 		if ready {
-			_, _ = s.updateJobDurable(job.ID, StatusReady, func(job *Job) { job.LastError = "" })
+			_, _ = s.updateObservedJob(job, StatusReady, func(current *Job) { current.LastError = ""; current.ObservationError = "" })
 		}
 	}
+}
+
+func (s *Service) jobImported(ctx context.Context, job Job) (bool, error) {
+	if s.arrs == nil {
+		return false, fmt.Errorf("Arr service unavailable")
+	}
+	instance, ok := s.arrs.Get(job.ArrName)
+	if !ok || len(job.Bindings) == 0 {
+		return false, ErrBindingUnsafe
+	}
+	if err := validateMutationInstance(instance, job.Bindings); err != nil {
+		return false, err
+	}
+	oldFiles := map[int]bool{}
+	for _, b := range job.Bindings {
+		oldFiles[b.ArrFileID] = true
+	}
+	cache := map[int][]arr.LibraryFile{}
+	for _, b := range job.Bindings {
+		if !b.AuthorizesMutation() {
+			return false, ErrBindingUnsafe
+		}
+		mediaID := b.MovieID
+		if instance.Type == arr.Sonarr {
+			mediaID = b.SeriesID
+		}
+		if mediaID <= 0 {
+			return false, ErrBindingUnsafe
+		}
+		files, exists := cache[mediaID]
+		if !exists {
+			var err error
+			files, err = s.arrs.LibraryFilesForMedia(ctx, instance.Name, []int{mediaID})
+			if err != nil {
+				return false, err
+			}
+			cache[mediaID] = files
+		}
+		remaining := slices.Clone(b.EpisodeIDs)
+		replaced := false
+		for _, file := range files {
+			if oldFiles[file.ArrFileID] || file.ArrFileID <= 0 || file.Path == "" {
+				continue
+			}
+			if instance.Type == arr.Radarr && file.MovieID == b.MovieID {
+				replaced = true
+				break
+			}
+			if instance.Type == arr.Sonarr && file.SeriesID == b.SeriesID {
+				remaining = slices.DeleteFunc(remaining, func(id int) bool { return slices.Contains(file.EpisodeIDs, id) })
+				replaced = len(b.EpisodeIDs) > 0 && len(remaining) == 0
+			}
+		}
+		if !replaced {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *Service) enqueueLibrary(request Request, binding Binding) (*Job, error) {
+	request.LibraryAudit = true
+	return s.enqueue(request, binding)
 }

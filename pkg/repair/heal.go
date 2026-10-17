@@ -37,6 +37,12 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 		return
 	}
 
+	if health.LibraryFile != nil {
+		current, err := r.storage.GetEntryHealth(health.EntryName)
+		if err == nil && (current.LibraryPaused || current.LibraryRemoved) {
+			return
+		}
+	}
 	initiated := 0
 	queued := 0
 	restoredCount := 0

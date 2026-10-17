@@ -19,6 +19,8 @@ type Command struct {
 	ID          int         `json:"id"`
 	Name        string      `json:"name"`
 	CommandName string      `json:"commandName"`
+	Ended       time.Time   `json:"ended,omitzero"`
+	Result      string      `json:"result,omitempty"`
 	Status      string      `json:"status"`
 	Queued      time.Time   `json:"queued,omitzero"`
 	Body        CommandBody `json:"body"`

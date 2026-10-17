@@ -55,6 +55,7 @@ type Service struct {
 	closed               bool
 	ctx                  context.Context
 	cancel               context.CancelFunc
+	importVerifier       func(context.Context, Job)
 	handler              Handler
 	wg                   sync.WaitGroup
 	jobsMu               sync.RWMutex
@@ -134,6 +135,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.started = true
 	s.wg.Go(func() { s.run(s.ctx) })
+	s.wg.Go(func() { s.monitorRecoveries(s.ctx) })
 	s.schedulePersistedRetries()
 	s.signal()
 	return nil
@@ -302,5 +304,19 @@ func (s *Service) signal() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
+	}
+}
+
+func (s *Service) SetImportVerifier(verify func(context.Context, Job)) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.importVerifier = verify
+}
+func (s *Service) verifyImported(ctx context.Context, job Job) {
+	s.lifecycleMu.RLock()
+	verify := s.importVerifier
+	s.lifecycleMu.RUnlock()
+	if verify != nil && job.Cause == CauseRepair {
+		verify(ctx, job)
 	}
 }

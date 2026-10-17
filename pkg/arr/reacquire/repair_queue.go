@@ -113,11 +113,13 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 		if job.Status.Terminal() {
 			continue
 		}
-		if job.Status == StatusQueued && job.StartedAt.IsZero() {
-			out.Queued++
-		} else {
-			out.InFlight++
+		if !job.occupiesSlot() {
+			if job.Status == StatusQueued {
+				out.Queued++
+			}
+			continue
 		}
+		out.InFlight++
 	}
 	return out
 }
@@ -125,7 +127,7 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 // Called by the single worker immediately before starting a new repair. Write
 // and sync the reservation before any Arr mutation. A failed save blocks dispatch.
 func (s *Service) reserveRepairDispatch(job Job) error {
-	if job.Cause != CauseRepair || !job.StartedAt.IsZero() {
+	if job.Cause != CauseRepair || !job.newDispatch() {
 		return nil
 	}
 	policy, err := config.Get().Repair.QueuePolicy()
@@ -166,7 +168,7 @@ func repairSeasonKey(b Binding) string {
 // A previous pack recovery may already have replaced another queued orphan.
 // Verify that case by Arr identity before allowing another delete/search.
 func (s *Service) completeQueuedLibraryJob(ctx context.Context, job Job) (bool, error) {
-	if job.Cause != CauseRepair || !job.StartedAt.IsZero() || len(job.Bindings) != 1 || job.Bindings[0].Confidence != ConfidenceLibraryFile || s.arrs == nil {
+	if job.Cause != CauseRepair || !job.newDispatch() || len(job.Bindings) != 1 || job.Bindings[0].Confidence != ConfidenceLibraryFile || s.arrs == nil {
 		return false, nil
 	}
 	b := job.Bindings[0]

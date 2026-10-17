@@ -66,6 +66,11 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	for _, id := range s.activeReacquisitions {
 		active := s.jobs[id]
 		for _, existing := range active.Bindings {
+			if sameRecoveryMedia(existing, binding) {
+				job := cloneJob(active)
+				s.jobsMu.Unlock()
+				return &job, nil
+			}
 			if existing.ArrName == binding.ArrName && existing.ArrFileID == binding.ArrFileID &&
 				existing.ArrInstanceFingerprint == binding.ArrInstanceFingerprint {
 				job := cloneJob(active)
@@ -87,18 +92,19 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	}
 	now := s.now()
 	job := Job{
-		ID:         uuid.NewString(),
-		Status:     StatusQueued,
-		Cause:      request.Cause,
-		Strategy:   request.Strategy,
-		ArrName:    binding.ArrName,
-		ArrType:    binding.ArrType,
-		EntryID:    request.EntryID,
-		FileID:     request.FileID,
-		DownloadID: binding.DownloadID,
-		Bindings:   bindings,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		LibraryAudit: request.LibraryAudit,
+		ID:           uuid.NewString(),
+		Status:       StatusQueued,
+		Cause:        request.Cause,
+		Strategy:     request.Strategy,
+		ArrName:      binding.ArrName,
+		ArrType:      binding.ArrType,
+		EntryID:      request.EntryID,
+		FileID:       request.FileID,
+		DownloadID:   binding.DownloadID,
+		Bindings:     bindings,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	save := s.jobRepository.Save
 	if job.Cause == CauseRepair {
@@ -218,8 +224,6 @@ func (s *Service) loadJobs(jobs []Job) error {
 }
 
 func (s *Service) run(ctx context.Context) {
-	ticker := time.NewTicker(maintenanceInterval)
-	defer ticker.Stop()
 	dispatchTicker := time.NewTicker(time.Second)
 	defer dispatchTicker.Stop()
 	for {
@@ -227,10 +231,6 @@ func (s *Service) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-dispatchTicker.C:
-			s.signal()
-		case <-ticker.C:
-			s.reconcileImportedJobs(ctx)
-			s.maintainJobs()
 			s.signal()
 		case <-s.wake:
 			for {
@@ -242,6 +242,23 @@ func (s *Service) run(ctx context.Context) {
 				if !ok {
 					break
 				}
+				if job.Status == StatusRetryScheduled {
+					if !s.prepareRecoveryRetry(ctx, job) {
+						if ctx.Err() != nil {
+							return
+						}
+						current, found := s.Job(job.ID)
+						if found && current.Status == StatusRetryScheduled && !current.RetryAt.After(s.now()) {
+							break
+						}
+						continue
+					}
+					current, found := s.Job(job.ID)
+					if !found || current.Status != StatusRetryScheduled {
+						continue
+					}
+					job = current
+				}
 				if err := s.reserveRepairDispatch(job); err != nil {
 					break
 				}
@@ -252,13 +269,13 @@ func (s *Service) run(ctx context.Context) {
 					return
 				}
 				if checkErr != nil {
-					status := StatusQueued
+					status := job.Status
 					if errors.Is(checkErr, ErrBindingUnsafe) {
 						status = StatusFailed
 					}
 					_, updateErr := s.updateJobDurable(job.ID, status, func(job *Job) {
 						job.LastError = checkErr.Error()
-						if status == StatusQueued {
+						if status == StatusQueued || status == StatusRetryScheduled {
 							job.RetryAt = s.now().Add(retryMaxDelay)
 						}
 					})
@@ -282,18 +299,37 @@ func (s *Service) run(ctx context.Context) {
 }
 
 func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
+	if job.Paused && job.newDispatch() {
+		return false
+	}
 	deadline := job.reconciliationDeadline()
+	if job.Status == StatusRetryScheduled {
+		deadline = time.Time{}
+	}
 	if !deadline.IsZero() && !s.now().Before(deadline) {
 		return s.stopReconciliation(job.ID, errors.New("Arr reconciliation deadline expired"))
 	}
-	started, err := s.updateJob(job.ID, StatusResolving, func(job *Job) {
-		job.RetryAt = time.Time{}
+	started, err := s.updateObservedJob(job, StatusResolving, func(current *Job) {
+		current.RetryAt = time.Time{}
+		if job.Status == StatusRetryScheduled {
+			current.Attempts = append(current.Attempts, RecoveryAttempt{Number: current.RetryCount + 1, StartedAt: attemptStart(job), EndedAt: s.now(), Outcome: current.RetryReason, Mutations: cloneJob(job).Mutations})
+			current.RetryCount++
+			current.RetryReason = ""
+			current.Mutations = nil
+			current.SearchCompletedAt = time.Time{}
+			current.AttemptStartedAt = s.now()
+		} else if current.AttemptStartedAt.IsZero() {
+			current.AttemptStartedAt = s.now()
+		}
 	})
 	if err != nil {
 		return false
 	}
 	progress := &serviceJobProgress{service: s, jobID: job.ID}
 	timeout := executionTimeout
+	if policy, err := config.Get().Repair.QueuePolicy(); job.Cause == CauseRepair && err == nil {
+		timeout = policy.SearchTimeout
+	}
 	if !deadline.IsZero() {
 		timeout = min(timeout, deadline.Sub(s.now()))
 	}
@@ -335,6 +371,13 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 				return s.stopReconciliation(job.ID, err)
 			}
 		}
+		if current.Cause == CauseRepair && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errNoReplacement)) {
+			reason := "search_error"
+			if errors.Is(err, errNoReplacement) {
+				reason = "no_download"
+			}
+			return s.scheduleRecovery(current, reason, err.Error()) == nil
+		}
 		_, updateErr := s.updateJob(job.ID, StatusFailed, func(job *Job) {
 			job.LastError = err.Error()
 			job.RetryAt = time.Time{}
@@ -361,31 +404,22 @@ func (s *Service) nextJob() (Job, bool) {
 	defer s.jobsMu.RUnlock()
 	inFlight := 0
 	for _, job := range s.jobs {
-		if job.Cause == CauseRepair && !job.Status.Terminal() && !(job.Status == StatusQueued && job.StartedAt.IsZero()) {
+		if job.Cause == CauseRepair && job.occupiesSlot() {
 			inFlight++
 		}
 	}
-	activeSeasons := make(map[string]bool)
-	for _, job := range s.jobs {
-		if job.Cause == CauseRepair && !job.Status.Terminal() && !(job.Status == StatusQueued && job.StartedAt.IsZero()) {
-			for _, binding := range job.Bindings {
-				if key := repairSeasonKey(binding); key != "" {
-					activeSeasons[key] = true
-				}
-			}
-		}
-	}
+	scopeBlocked := s.scopeGuardsLocked()
 	var next Job
 	found := false
 	for _, id := range s.activeReacquisitions {
 		job, ok := s.jobs[id]
-		if !ok || !job.Status.dispatchable() || job.RetryAt.After(s.now()) {
+		if !ok || !job.Status.dispatchable() || job.Paused || job.RetryAt.After(s.now()) {
 			continue
 		}
-		if job.Cause == CauseRepair && job.StartedAt.IsZero() && (policyErr != nil || policy.Paused || inFlight >= policy.MaxActive || s.now().Before(nextAllowed)) {
+		if job.Cause == CauseRepair && job.newDispatch() && (policyErr != nil || policy.Paused || inFlight >= policy.MaxActive || s.now().Before(nextAllowed)) {
 			continue
 		}
-		if job.Cause == CauseRepair && job.StartedAt.IsZero() && len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile && activeSeasons[repairSeasonKey(job.Bindings[0])] {
+		if job.Cause == CauseRepair && job.newDispatch() && scopeBlocked(job) {
 			continue
 		}
 		if !found || job.UpdatedAt.Before(next.UpdatedAt) {
@@ -410,6 +444,14 @@ func (s *Service) updateJobWithDurability(
 	mutate func(*Job),
 	durable bool,
 ) (Job, error) {
+	return s.updateJobState(id, status, mutate, durable, nil)
+}
+
+func (s *Service) updateObservedJob(job Job, status Status, mutate func(*Job)) (Job, error) {
+	return s.updateJobState(job.ID, status, mutate, true, &job)
+}
+
+func (s *Service) updateJobState(id string, status Status, mutate func(*Job), durable bool, expected *Job) (Job, error) {
 	if !status.valid() {
 		return Job{}, fmt.Errorf("invalid reacquire status %q", status)
 	}
@@ -419,6 +461,9 @@ func (s *Service) updateJobWithDurability(
 	original, ok := s.jobs[id]
 	if !ok {
 		return Job{}, fmt.Errorf("reacquire job %q not found", id)
+	}
+	if expected != nil && (original.Revision != expected.Revision || original.Status != expected.Status || !original.UpdatedAt.Equal(expected.UpdatedAt)) {
+		return Job{}, fmt.Errorf("job changed; refresh and try again")
 	}
 	if original.Status.Terminal() && status != original.Status {
 		return Job{}, fmt.Errorf("reacquire job %q is already %s", id, original.Status)
@@ -437,7 +482,14 @@ func (s *Service) updateJobWithDurability(
 	job.DownloadID = original.DownloadID
 	job.Bindings = cloneJob(original).Bindings
 	job.CreatedAt = original.CreatedAt
+	if job.PhaseStartedAt.IsZero() {
+		job.PhaseStartedAt = original.UpdatedAt
+	}
+	if status != original.Status {
+		job.PhaseStartedAt = s.now()
+	}
 	job.Status = status
+	job.Revision = original.Revision + 1
 	job.UpdatedAt = s.now()
 	if status != StatusQueued && job.StartedAt.IsZero() {
 		job.StartedAt = job.UpdatedAt
@@ -597,7 +649,7 @@ func (status Status) waiting() bool {
 }
 
 func (status Status) dispatchable() bool {
-	return status == StatusQueued || status == StatusResolving || status == StatusInvalidating || status == StatusBlocklisting || status == StatusSearching
+	return status == StatusRetryScheduled || status == StatusQueued || status == StatusResolving || status == StatusInvalidating || status == StatusBlocklisting || status == StatusSearching
 }
 
 func keyForBinding(binding Binding) jobKey {
@@ -689,21 +741,27 @@ func replacementCandidate(candidates []Binding, oldDownloadID string, matches fu
 func (s *Service) maintainJobs() {
 	now := s.now()
 	var expire []string
+	var stalled []Job
 	var prune []string
 
 	s.jobsMu.RLock()
 	for id, job := range s.jobs {
 		switch {
-		case job.Status.waiting() && now.Sub(job.UpdatedAt) >= waitingTimeout:
+		case job.Cause == CauseRepair && job.Status.waiting() && now.Sub(phaseStart(job)) >= waitingTimeout:
+			stalled = append(stalled, cloneJob(job))
+		case job.Cause != CauseRepair && job.Status.waiting() && now.Sub(phaseStart(job)) >= waitingTimeout:
 			expire = append(expire, id)
-		case job.Status == StatusFailed && terminalAge(now, job) >= failureRetention:
+		case job.Cause != CauseRepair && job.Status == StatusFailed && terminalAge(now, job) >= failureRetention:
 			prune = append(prune, id)
-		case (job.Status == StatusReady || job.Status == StatusCancelled) && terminalAge(now, job) >= successRetention:
+		case job.Cause != CauseRepair && (job.Status == StatusReady || job.Status == StatusCancelled) && terminalAge(now, job) >= successRetention:
 			prune = append(prune, id)
 		}
 	}
 	s.jobsMu.RUnlock()
 
+	for _, j := range stalled {
+		_ = s.attention(j, "Replacement has not progressed before the recovery deadline; inspect Arr before retrying")
+	}
 	for _, id := range expire {
 		_, _ = s.updateJob(id, StatusFailed, func(job *Job) {
 			job.LastError = "replacement was not imported before the reacquisition timeout"

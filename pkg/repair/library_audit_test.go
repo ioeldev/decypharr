@@ -70,6 +70,7 @@ func TestLibraryReadRejectsTruncatedOrErrorContent(t *testing.T) {
 }
 
 func TestLibraryTimeoutDoesNotAccumulateBlockedWorkers(t *testing.T) {
+	setLibraryWorkers(t, 1)
 	service := New(Dependencies{})
 	release := make(chan struct{})
 	started := make(chan struct{})
@@ -90,7 +91,7 @@ func TestLibraryTimeoutDoesNotAccumulateBlockedWorkers(t *testing.T) {
 	}
 	close(release)
 	deadline := time.Now().Add(time.Second)
-	for len(service.libraryProbeSlot) > 0 && time.Now().Before(deadline) {
+	for libraryProbeCount(service) > 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	if result := service.boundedLibraryIO(t.Context(), time.Second, func() libraryProbeResult { return libraryProbeResult{status: storage.HealthHealthy} }); result.status != storage.HealthHealthy {
@@ -191,7 +192,7 @@ func TestLibraryRepairVerifiesOriginalReinsertion(t *testing.T) {
 	}
 }
 
-func TestLibraryAuditEnumeratesOrphansAndPrunesReplacedFiles(t *testing.T) {
+func TestLibraryAuditRetainsRemovedIncidents(t *testing.T) {
 	store := newRepairTestStorage(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Keeper.mkv")
@@ -259,8 +260,9 @@ func TestLibraryAuditEnumeratesOrphansAndPrunesReplacedFiles(t *testing.T) {
 	if _, err := service.collectLibraryAuditFiles(t.Context(), RunOptions{IgnoreLastChecked: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.GetEntryHealth(health.EntryName); err == nil {
-		t.Fatal("replaced Arr file left a permanent broken finding")
+	retained, err := store.GetEntryHealth(health.EntryName)
+	if err != nil || !retained.LibraryRemoved || retained.Status != storage.HealthUnknown || len(retained.BrokenFiles) != 0 || retained.LastFailedAt.IsZero() {
+		t.Fatalf("removed incident lost history or stayed actionable: %+v %v", retained, err)
 	}
 }
 
@@ -274,5 +276,185 @@ func TestLibraryAuditCancellationIsNotReportedAsSuccess(t *testing.T) {
 	saved, err := store.GetRepairRun(run.ID)
 	if err != nil || saved.Status != storage.RepairRunCancelled {
 		t.Fatalf("cancelled run: %+v %v", saved, err)
+	}
+}
+
+func setLibraryWorkers(t *testing.T, workers int) {
+	t.Helper()
+	old := config.Get().Repair
+	t.Cleanup(func() { _, _ = config.Update(func(c *config.Config) error { c.Repair = old; return nil }) })
+	if _, err := config.Update(func(c *config.Config) error { c.Repair.Workers = workers; return nil }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func libraryProbeCount(service *Service) int {
+	service.libraryProbeMu.Lock()
+	defer service.libraryProbeMu.Unlock()
+	return service.libraryProbeActive
+}
+
+func TestLibraryConcurrentProbesRetainSlotsAfterCancellation(t *testing.T) {
+	setLibraryWorkers(t, 3)
+	service := New(Dependencies{})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{}, 3)
+	results := make(chan libraryProbeResult, 3)
+	for range 3 {
+		go func() {
+			results <- service.boundedLibraryIO(ctx, time.Second, func() libraryProbeResult {
+				started <- struct{}{}
+				<-release
+				return libraryProbeResult{status: storage.HealthHealthy}
+			})
+		}()
+	}
+	for range 3 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("configured workers did not probe concurrently")
+		}
+	}
+	cancel()
+	for range 3 {
+		select {
+		case result := <-results:
+			if result.status != storage.HealthUnknown {
+				t.Fatalf("cancelled probe: %+v", result)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("cancellation waited for blocked filesystem call")
+		}
+	}
+	if active := libraryProbeCount(service); active != 3 {
+		t.Fatalf("blocked slots = %d, want 3", active)
+	}
+	// A subsequent run cannot replace workers still stuck in the old run.
+	var called atomic.Bool
+	result := service.boundedLibraryIO(t.Context(), 20*time.Millisecond, func() libraryProbeResult {
+		called.Store(true)
+		return libraryProbeResult{status: storage.HealthHealthy}
+	})
+	if called.Load() || result.reason != "library_io_busy" {
+		t.Fatalf("exceeded worker budget: %+v", result)
+	}
+	// Lowering the configured concurrency also keeps those slots accounted for.
+	if _, err := config.Update(func(c *config.Config) error { c.Repair.Workers = 1; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	result = service.boundedLibraryIO(t.Context(), 20*time.Millisecond, func() libraryProbeResult {
+		called.Store(true)
+		return libraryProbeResult{status: storage.HealthHealthy}
+	})
+	if called.Load() || result.reason != "library_io_busy" {
+		t.Fatalf("config update lost occupied slots: %+v", result)
+	}
+}
+
+func TestLibraryAuditConcurrentCountsAndDuplicateSelection(t *testing.T) {
+	setLibraryWorkers(t, 4)
+	store := newRepairTestStorage(t)
+	fake := &fakeReacquirer{library: func(reacquire.LibraryRequest) (*reacquire.Job, error) {
+		return &reacquire.Job{ID: "queued"}, nil
+	}}
+	service := New(Dependencies{Storage: store, Reacquirer: fake})
+	dir := t.TempDir()
+	old := config.Get().Mount
+	t.Cleanup(func() { _, _ = config.Update(func(c *config.Config) error { c.Mount = old; return nil }) })
+	if _, err := config.Update(func(c *config.Config) error { c.Mount.MountPath = dir; c.Mount.Type = "dfs"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "version.txt"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for i := range 48 {
+		key := fmt.Sprintf("library:%d", i)
+		path := filepath.Join(dir, fmt.Sprintf("%d.mkv", i))
+		switch i % 3 {
+		case 0:
+			writeLibrarySample(t, path)
+		case 1:
+			if err := os.Symlink(filepath.Join(dir, "missing.mkv"), path); err != nil {
+				t.Fatal(err)
+			}
+		case 2:
+			path = filepath.Join(dir, "unmounted", fmt.Sprintf("%d.mkv", i))
+		}
+		if err := store.SaveEntryHealth(&storage.EntryHealth{EntryName: key, LibraryFile: &storage.BrokenFile{LibraryAudit: true, ArrName: "movies", ArrKind: storage.ArrKindRadarr, SourcePath: path}}); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key, key)
+	}
+	for _, autoRepair := range []bool{false, true} {
+		run := &storage.RepairRun{ID: fmt.Sprintf("concurrent-audit-%v", autoRepair)}
+		service.executeLibraryAudit(t.Context(), run, RunOptions{LibraryEntries: keys, AutoRepair: &autoRepair}, nil)
+		saved, err := store.GetRepairRun(run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantQueued := 0
+		if autoRepair {
+			wantQueued = 16
+		}
+		if saved.Status != storage.RepairRunCompleted || saved.Stats.Candidates != 48 || saved.Stats.Probed != 48 || saved.Stats.Healthy != 16 || saved.Stats.Broken != 16 || saved.Stats.Unknown != 16 || saved.Stats.Queued != wantQueued {
+			t.Fatalf("concurrent audit totals: %+v", saved)
+		}
+		if len(fake.libraryRequests) != wantQueued {
+			t.Fatalf("recovery submissions = %d, want %d", len(fake.libraryRequests), wantQueued)
+		}
+	}
+}
+
+func TestLibraryIncidentSurvivesReplacementAndConcurrentPause(t *testing.T) {
+	store := newRepairTestStorage(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.mkv")
+	writeLibrarySample(t, path)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Error("audit mutated Arr")
+		}
+		file := map[string]any{"id": 43, "movieId": 9, "path": path}
+		movie := map[string]any{"id": 9, "movieFile": file}
+		if r.URL.Path == "/api/v3/movie/9" {
+			_ = json.NewEncoder(w).Encode(movie)
+		} else {
+			_ = json.NewEncoder(w).Encode([]any{movie})
+		}
+	}))
+	defer server.Close()
+	registry := arr.New()
+	instance := arr.Arr{Name: "movies", Host: server.URL, Token: "test", Type: arr.Radarr}
+	registry.AddOrUpdate(instance)
+	service := New(Dependencies{Storage: store, Arrs: registry})
+	h := &storage.EntryHealth{EntryName: libraryKey(instance, 42), Status: storage.HealthBroken, LastFailedAt: time.Now().Add(-time.Hour), LibraryFile: &storage.BrokenFile{LibraryAudit: true, ArrName: instance.Name, ArrFingerprint: instance.Fingerprint(), ArrKind: storage.ArrKindRadarr, MediaID: 9, ArrFileID: 42, SourcePath: "/old.mkv"}}
+	if err := store.SaveEntryHealth(h); err != nil {
+		t.Fatal(err)
+	}
+	files, err := service.collectLibraryAuditFiles(t.Context(), RunOptions{IgnoreLastChecked: true})
+	if err != nil || len(files) != 1 || files[0].EntryName != h.EntryName || files[0].LibraryFile.ArrFileID != 43 {
+		t.Fatalf("replacement identity: %+v %v", files, err)
+	}
+	// Pause after enumeration; persisting the probe must not overwrite the action.
+	if err := service.PauseLibraryIncident(h.EntryName, true); err != nil {
+		t.Fatal(err)
+	}
+	if result := service.auditOneLibraryFile(t.Context(), files[0]); result.status != storage.HealthHealthy {
+		t.Fatalf("read: %+v", result)
+	}
+	incidents, err := service.LibraryIncidents()
+	if err != nil || len(incidents) != 1 || incidents[0].Status != storage.HealthHealthy || !incidents[0].LibraryPaused || incidents[0].LastFailedAt.IsZero() {
+		t.Fatalf("history/pause: %+v %v", incidents, err)
+	}
+	if err := service.refreshLibraryIncident(t.Context(), incidents[0]); err != nil {
+		t.Fatal(err)
+	}
+	if incidents[0].LibraryFile.ArrFileID != 43 {
+		t.Fatal("manual recheck retained old Arr ID")
 	}
 }

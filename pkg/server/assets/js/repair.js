@@ -7,6 +7,7 @@ class RepairManager {
     constructor() {
         this.api = `${window.urlBase}api`;
         this.statusTimer = null;
+        this.recoveryTimer = null;
         this.activeRunId = null;
         this.brokenState = {items: [], page: 1, pageSize: 25};
         this.repairConfig = {};
@@ -40,7 +41,7 @@ class RepairManager {
     }
 
     async loadAll() {
-        await Promise.all([this.loadRepairConfig(), this.loadStatus(), this.loadHistory(), this.loadArrs()]);
+        await Promise.all([this.loadRepairConfig(), this.loadStatus(), this.pollRecovery(), this.loadHistory(), this.loadArrs()]);
     }
 
     async loadRepairConfig() {
@@ -349,15 +350,29 @@ class RepairManager {
     }
 
     async loadStatus() {
+        if (this.statusLoading) return;
+        this.statusLoading = true;
         try {
             const status = await this.fetchJSON(`${this.api}/repair/status`);
             this.renderStatus(status || {});
-            await this.loadRecoveryProgress();
-            this.scheduleStatusPoll(status);
         } catch (e) {
             console.error('Failed to load status', e);
-            await this.loadRecoveryProgress();
+            const line = document.getElementById('repairStatusLine');
+            if (line) line.textContent = 'Audit status unavailable; retrying automatically. Recovery tracking continues separately.';
+        } finally {
+            this.statusLoading = false;
             this.scheduleStatusPoll(this.latestStatus);
+        }
+    }
+
+    async pollRecovery() {
+        if (this.recoveryLoading) return;
+        this.recoveryLoading = true;
+        clearTimeout(this.recoveryTimer);
+        try { await this.loadRecoveryProgress(); }
+        finally {
+            this.recoveryLoading = false;
+            this.recoveryTimer = setTimeout(() => this.pollRecovery(), this.recoveryPending ? 5000 : 15000);
         }
     }
 
@@ -385,14 +400,14 @@ class RepairManager {
         try {
             const q = await this.fetchJSON(`${this.api}/arr/reacquire/queue`);
             const counts = q.status_counts || {};
-            this.recoveryPending = q.queued + q.in_flight > 0;
+            this.recoveryPending = q.queued + q.in_flight + (counts.retry_scheduled || 0) > 0;
             const next = q.next_allowed_at ? new Date(q.next_allowed_at) : null;
             const wait = next && next > new Date() ? ` Next start: ${next.toLocaleTimeString()}.` : '';
             line.textContent = `${q.paused ? 'New recoveries paused.' : 'Recovery queue active.'} ${q.in_flight}/${q.max_active} active slots.${wait}${q.error ? ` ${q.error}` : ''}`;
             const working = ['resolving', 'invalidating', 'blocklisting', 'searching'].reduce((n, key) => n + (counts[key] || 0), 0)
                 + Math.max(0, (counts.queued || 0) - q.queued);
             const tiles = [
-                ['Queued', q.queued], ['Working', working],
+                ['Queued', q.queued], ['Working', working], ['Retry scheduled', counts.retry_scheduled || 0],
                 ['Waiting for grab', counts.waiting_for_grab || 0],
                 ['Downloading', counts.waiting_for_download || 0],
                 ['Waiting for import', counts.waiting_for_import || 0],
@@ -832,9 +847,13 @@ class RepairManager {
     }
 
     async fetchJSON(url) {
-        const res = await fetch(url, {credentials: 'same-origin'});
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        try {
+            const res = await fetch(url, {credentials: 'same-origin', signal: controller.signal});
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        } finally { clearTimeout(timer); }
     }
 
     toast(message, type = 'info') {

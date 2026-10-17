@@ -64,6 +64,7 @@ func (q QBitTorrent) IsZero() bool {
 }
 
 type Arr struct {
+	BrowserURL       string `json:"browser_url,omitempty"`
 	Name             string `json:"name,omitempty"`
 	Host             string `json:"host,omitempty"`
 	Token            string `json:"token,omitempty"`
@@ -74,7 +75,7 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.BrowserURL == "" && a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps
@@ -228,6 +229,9 @@ type RepairConfig struct {
 	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
 	QueueBatchPause       string       `json:"queue_batch_pause,omitempty"`
 	QueueMaxActive        int          `json:"queue_max_active,omitempty"`
+	QueueSearchTimeout    string       `json:"queue_search_timeout,omitempty"`
+	QueueSearchGrace      string       `json:"queue_search_grace,omitempty"`
+	QueueRetryDelays      string       `json:"queue_retry_delays,omitempty"`
 	QueuePaused           bool         `json:"queue_paused,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
@@ -249,7 +253,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && !r.QueuePaused
+		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
 }
 
 type Config struct {

@@ -31,13 +31,15 @@ type QueueResponseScheme struct {
 }
 
 type QueueSchema struct {
-	SeriesId              int    `json:"seriesId"`
-	EpisodeId             int    `json:"episodeId"`
-	SeasonNumber          int    `json:"seasonNumber"`
-	Title                 string `json:"title"`
-	Status                string `json:"status"`
-	TrackedDownloadStatus string `json:"trackedDownloadStatus"`
-	TrackedDownloadState  string `json:"trackedDownloadState"`
+	MovieId               int     `json:"movieId"`
+	Sizeleft              float64 `json:"sizeleft"`
+	SeriesId              int     `json:"seriesId"`
+	EpisodeId             int     `json:"episodeId"`
+	SeasonNumber          int     `json:"seasonNumber"`
+	Title                 string  `json:"title"`
+	Status                string  `json:"status"`
+	TrackedDownloadStatus string  `json:"trackedDownloadStatus"`
+	TrackedDownloadState  string  `json:"trackedDownloadState"`
 	StatusMessages        []struct {
 		Title    string   `json:"title"`
 		Messages []string `json:"messages"`

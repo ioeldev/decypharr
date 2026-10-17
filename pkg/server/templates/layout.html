@@ -141,6 +141,8 @@
     {{ template "download" . }}
     {{ else if eq .Page "repair" }}
     {{ template "repair" . }}
+    {{ else if eq .Page "library-repair" }}
+    {{ template "library_repair" . }}
     {{ else if eq .Page "reacquire" }}
     {{ template "reacquire" . }}
     {{ else if eq .Page "stats" }}
@@ -196,11 +198,13 @@
 {{ else if eq .Page "download" }}
 <script src="{{.URLBase}}assets/js/download.js"></script>
 {{ else if eq .Page "repair" }}
-<script src="{{.URLBase}}assets/js/repair.js"></script>
+<script src="{{.URLBase}}assets/js/repair.js?v={{.RecoveryAssetVersion}}"></script>
+{{ else if eq .Page "library-repair" }}
+<script src="{{.URLBase}}assets/js/library-repair.js?v={{.RecoveryAssetVersion}}"></script>
 {{ else if eq .Page "reacquire" }}
-<script src="{{.URLBase}}assets/js/reacquire.js"></script>
+<script src="{{.URLBase}}assets/js/reacquire.js?v={{.RecoveryAssetVersion}}"></script>
 {{ else if eq .Page "config" }}
-<script src="{{.URLBase}}assets/js/config.js"></script>
+<script src="{{.URLBase}}assets/js/config.js?v={{.RecoveryAssetVersion}}"></script>
 {{ else if eq .Page "setup" }}
 <script src="{{.URLBase}}assets/js/setup.js"></script>
 {{ end }}

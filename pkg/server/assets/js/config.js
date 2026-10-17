@@ -248,7 +248,7 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
-        for (const [key, fallback] of Object.entries({queue_interval:'10s',queue_batch_size:50,queue_batch_pause:'5m',queue_max_active:10})) {
+        for (const [key, fallback] of Object.entries({queue_interval:'10s',queue_batch_size:50,queue_batch_pause:'5m',queue_max_active:10,queue_search_timeout:'5m',queue_search_grace:'2m',queue_retry_delays:'6h,24h,72h'})) {
             if ($('repair.'+key)) $('repair.'+key).value = repair[key] || fallback;
         }
         if ($('repair.queue_paused')) $('repair.queue_paused').checked = !!repair.queue_paused;
@@ -279,6 +279,9 @@ class ConfigManager {
             queue_batch_size: parseInt($('repair.queue_batch_size')?.value,10) || 50,
             queue_batch_pause: $('repair.queue_batch_pause')?.value.trim() || '5m',
             queue_max_active: parseInt($('repair.queue_max_active')?.value,10) || 10,
+            queue_search_timeout: $('repair.queue_search_timeout')?.value.trim() || '5m',
+            queue_search_grace: $('repair.queue_search_grace')?.value.trim() || '2m',
+            queue_retry_delays: $('repair.queue_retry_delays')?.value.trim() || '6h,24h,72h',
             queue_paused: $('repair.queue_paused')?.checked || false,
             verify_content: $('repair.verify_content')?.checked || false,
             arrs,
@@ -1214,6 +1217,11 @@ class ConfigManager {
                         </div>
 
                         <div>
+                            <label class="label" for="arr[${index}].browser_url"><span class="font-medium">Browser URL (optional)</span></label>
+                            <input type="url" class="input w-full" name="arr[${index}].browser_url" id="arr[${index}].browser_url" placeholder="https://sonarr.example.com">
+                            <span class="label-text-alt opacity-70">Used by library repair links. Leave empty to use Host.</span>
+                        </div>
+                        <div>
                             <label class="label" for="arr[${index}].token">
                                 <span class="font-medium">API Token</span>
                             </label>
@@ -1509,6 +1517,7 @@ class ConfigManager {
 
             const provider = {
                 host: hostInput.value,
+                browser_url: getField('browser_url')?.value.trim() || '',
                 port: parseInt(portInput.value) || 119,
                 username: usernameInput.value,
                 password: passwordInput.value,
@@ -1632,6 +1641,7 @@ class ConfigManager {
             const arr = {
                 name: nameInput.value,
                 host: hostInput.value,
+                browser_url: getField('browser_url')?.value.trim() || '',
                 token: tokenInput.value,
                 skip_repair: skipRepairInput.checked,
                 selected_debrid: selectedDebridInput.value,

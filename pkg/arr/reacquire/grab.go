@@ -20,6 +20,8 @@ func (handler *arrHandler) grabBestRelease(
 	return handler.grabReplacementRelease(ctx, instance, job, bindings, progress, false)
 }
 
+var errNoReplacement = errors.New("no downloadable replacement release")
+
 var errNoSeasonPack = errors.New("no eligible replacement season pack")
 
 // seasonPackFirst never fails grab history: Sonarr can automatically search
@@ -94,7 +96,7 @@ func (handler *arrHandler) grabReplacementRelease(ctx context.Context, instance 
 	if seasonPackOnly {
 		return "", errNoSeasonPack
 	}
-	return "", fmt.Errorf("arr returned no downloadable replacement release with reconcilable identity")
+	return "", fmt.Errorf("%w with reconcilable identity", errNoReplacement)
 }
 
 func (handler *arrHandler) replacementReleases(ctx context.Context, instance arr.Arr, job *Job, bindings []Binding, seasonPackOnly bool) ([]arr.Release, error) {

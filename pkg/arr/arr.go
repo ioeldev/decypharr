@@ -32,6 +32,7 @@ const (
 // Arr is one configured Arr instance. It carries no behaviour: every call to
 // an instance goes through Service.
 type Arr struct {
+	BrowserURL       string `json:"browser_url,omitempty"`
 	Name             string `json:"name"`
 	Host             string `json:"host"`
 	Token            string `json:"token"`
@@ -109,6 +110,7 @@ func fromConfig(c config.Arr) Arr {
 		Token:            strings.TrimSpace(c.Token),
 		Type:             inferType(c.Host, c.Name),
 		SkipRepair:       c.SkipRepair,
+		BrowserURL:       c.BrowserURL,
 		DownloadUncached: c.DownloadUncached,
 		SelectedDebrid:   c.SelectedDebrid,
 		Source:           Source(c.Source),
@@ -121,6 +123,7 @@ func (a Arr) toConfig() config.Arr {
 		Host:             a.Host,
 		Token:            a.Token,
 		SkipRepair:       a.SkipRepair,
+		BrowserURL:       a.BrowserURL,
 		DownloadUncached: a.DownloadUncached,
 		SelectedDebrid:   a.SelectedDebrid,
 		Source:           string(a.Source),

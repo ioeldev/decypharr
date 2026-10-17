@@ -18,6 +18,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"golang.org/x/sync/errgroup"
 )
 
 const librarySampleBytes = 64 * 1024
@@ -33,22 +34,52 @@ func libraryKey(instance arr.Arr, id int) string {
 	return fmt.Sprintf("library:%x", sum[:])
 }
 
-// boundedLibraryIO never launches another filesystem worker while an earlier
-// syscall is stuck, even when the earlier run has already been cancelled.
+// acquireLibraryProbe shares the worker budget across audits and rechecks.
+// Cancellation never releases a slot still occupied by a blocked syscall.
+// Read the configured limit on each acquisition, without replacing the gate
+// when settings change (which would lose track of older blocked reads).
+func (r *Service) acquireLibraryProbe(ctx context.Context) bool {
+	for {
+		r.libraryProbeMu.Lock()
+		if ctx.Err() != nil {
+			r.libraryProbeMu.Unlock()
+			return false
+		}
+		if r.libraryProbeActive < r.workers() {
+			r.libraryProbeActive++
+			r.libraryProbeMu.Unlock()
+			return true
+		}
+		changed := r.libraryProbeChanged
+		r.libraryProbeMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-changed:
+		}
+	}
+}
+
+func (r *Service) releaseLibraryProbe() {
+	r.libraryProbeMu.Lock()
+	defer r.libraryProbeMu.Unlock()
+	r.libraryProbeActive--
+	close(r.libraryProbeChanged)
+	r.libraryProbeChanged = make(chan struct{})
+}
+
 func (r *Service) boundedLibraryIO(ctx context.Context, timeout time.Duration, probe func() libraryProbeResult) libraryProbeResult {
 	if ctx.Err() != nil {
 		return libraryProbeResult{storage.HealthUnknown, "library_read_timeout"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	select {
-	case r.libraryProbeSlot <- struct{}{}:
-	case <-ctx.Done():
+	if !r.acquireLibraryProbe(ctx) {
 		return libraryProbeResult{storage.HealthUnknown, "library_io_busy"}
 	}
 	result := make(chan libraryProbeResult, 1)
 	go func() {
-		defer func() { <-r.libraryProbeSlot }()
+		defer r.releaseLibraryProbe()
 		result <- probe()
 	}()
 	select {
@@ -136,10 +167,20 @@ func (r *Service) libraryMountReady(ctx context.Context) libraryProbeResult {
 func (r *Service) collectLibraryAuditFiles(ctx context.Context, opts RunOptions) ([]*storage.EntryHealth, error) {
 	var out []*storage.EntryHealth
 	if len(opts.LibraryEntries) > 0 {
+		seen := make(map[string]bool)
 		for _, key := range opts.LibraryEntries {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			health, err := r.storage.GetEntryHealth(key)
 			if err != nil || health == nil || health.LibraryFile == nil {
 				return nil, fmt.Errorf("library audit entry not found")
+			}
+			if r.arrs != nil && health.LibraryFile.MediaID > 0 {
+				if err := r.refreshLibraryIncident(ctx, health); err != nil {
+					return nil, err
+				}
 			}
 			out = append(out, health)
 		}
@@ -149,6 +190,16 @@ func (r *Service) collectLibraryAuditFiles(ctx context.Context, opts RunOptions)
 		if instance.Type != arr.Sonarr && instance.Type != arr.Radarr {
 			continue
 		}
+		prior := map[string]*storage.EntryHealth{}
+		_ = r.storage.ForEachEntryHealth(func(h *storage.EntryHealth) error {
+			if h.LibraryFile != nil && h.LibraryFile.ArrName == instance.Name && h.LibraryFile.ArrFingerprint == instance.Fingerprint() {
+				key := libraryMediaKey(*h.LibraryFile)
+				if old := prior[key]; old == nil || (!h.LastFailedAt.IsZero() && old.LastFailedAt.IsZero()) {
+					prior[key] = h
+				}
+			}
+			return nil
+		})
 		files, err := r.arrs.LibraryFiles(ctx, instance.Name)
 		if err != nil {
 			return nil, fmt.Errorf("enumerate library for Arr %s: %w", instance.Name, err)
@@ -159,18 +210,18 @@ func (r *Service) collectLibraryAuditFiles(ctx context.Context, opts RunOptions)
 				continue
 			}
 			key := libraryKey(instance, file.ArrFileID)
+			if seen[key] {
+				continue
+			}
 			seen[key] = true
 			h, _ := r.storage.GetEntryHealth(key)
 			if h == nil {
 				h = &storage.EntryHealth{EntryName: key}
 			}
-			if !opts.IgnoreLastChecked && !h.IsDue(time.Now(), r.recheckInterval()) {
-				continue
-			}
 			broken := storage.BrokenFile{
 				LibraryAudit: true, ArrName: instance.Name, ArrKind: arrKindFromType(instance.Type), ArrFingerprint: instance.Fingerprint(),
 				ArrFileID: file.ArrFileID, SourcePath: file.Path, FileName: filepath.Base(file.Path), Size: file.Size,
-				MediaID: file.MovieID,
+				MediaID: file.MovieID, EpisodeIDs: slices.Clone(file.EpisodeIDs), SeasonNumber: file.SeasonNumber,
 			}
 			if instance.Type == arr.Sonarr {
 				broken.MediaID = file.SeriesID
@@ -178,6 +229,16 @@ func (r *Service) collectLibraryAuditFiles(ctx context.Context, opts RunOptions)
 			if len(file.EpisodeIDs) > 0 {
 				broken.EpisodeID = file.EpisodeIDs[0]
 			}
+			if old := prior[libraryMediaKey(broken)]; old != nil {
+				h = old
+				key = h.EntryName
+				seen[key] = true
+			}
+			unchanged := h.LibraryFile != nil && h.LibraryFile.ArrFileID == file.ArrFileID && h.LibraryFile.SourcePath == file.Path
+			if unchanged && !opts.IgnoreLastChecked && !h.IsDue(time.Now(), r.recheckInterval()) {
+				continue
+			}
+			h.LibraryRemoved = false
 			// Readlink does not dereference a missing target. Do not guess by size/title.
 			// Do this in the bounded worker during probing, never on the API goroutine.
 			h.LibraryFile = &broken
@@ -187,12 +248,26 @@ func (r *Service) collectLibraryAuditFiles(ctx context.Context, opts RunOptions)
 		// Remove results for files the Arr no longer owns after a completed
 		// enumeration (for example the old ID after a successful replacement).
 		var stale []string
+		var removed []*storage.EntryHealth
 		_ = r.storage.ForEachEntryHealth(func(h *storage.EntryHealth) error {
 			if f := h.LibraryFile; f != nil && f.ArrName == instance.Name && f.ArrFingerprint == instance.Fingerprint() && !seen[h.EntryName] {
-				stale = append(stale, h.EntryName)
+				if !h.LastFailedAt.IsZero() {
+					if !h.LibraryRemoved {
+						h.LibraryRemoved = true
+						h.Status = storage.HealthUnknown
+						h.FailureReason = "library_file_removed_from_arr"
+						h.BrokenFiles = nil
+						removed = append(removed, h)
+					}
+				} else {
+					stale = append(stale, h.EntryName)
+				}
 			}
 			return nil
 		})
+		for _, h := range removed {
+			r.saveHealth(h)
+		}
 		for _, key := range stale {
 			if err := r.storage.DeleteEntryHealth(key); err != nil {
 				return nil, err
@@ -289,42 +364,53 @@ func (r *Service) executeLibraryAudit(ctx context.Context, run *storage.RepairRu
 	r.saveRun(run)
 	var mu sync.Mutex
 	var names []string
+	var repairMu sync.Mutex
+	g, probeCtx := errgroup.WithContext(ctx)
+	g.SetLimit(r.workers())
 	for _, h := range files {
-		if ctx.Err() != nil {
-			r.finishCancelledRepairSweep(ctx, run, stop, autoRepair, "library audit cancelled", names)
-			return
+		if probeCtx.Err() != nil {
+			break
 		}
-		result := r.auditOneLibraryFile(ctx, h)
-		names = append(names, h.EntryName)
-		run.Stats.Probed++
-		switch result.status {
-		case storage.HealthHealthy:
-			run.Stats.Healthy++
-		case storage.HealthBroken:
-			run.Stats.Broken++
-		default:
-			run.Stats.Unknown++
-		}
-		r.saveRun(run)
-		if ctx.Err() != nil {
-			r.finishCancelledRepairSweep(ctx, run, stop, autoRepair, "library audit cancelled", names)
-			return
-		}
-		if result.reason == "library_read_timeout" || result.reason == "library_io_busy" {
-			r.finalizeRun(run, storage.RepairRunFailed, result.reason+": audit stopped to avoid accumulating blocked filesystem reads", "")
-			return
-		}
-		if autoRepair && h.Status == storage.HealthBroken {
-			r.healBrokenEntry(ctx, run, &mu, h)
-		}
-		// Limit mount read-ahead pressure independently of provider API workers.
-		select {
-		case <-ctx.Done():
-		case <-time.After(500 * time.Millisecond):
-		}
+		g.Go(func() error {
+			if probeCtx.Err() != nil {
+				return probeCtx.Err()
+			}
+			result := r.auditOneLibraryFile(probeCtx, h)
+			mu.Lock()
+			names = append(names, h.EntryName)
+			run.Stats.Probed++
+			switch result.status {
+			case storage.HealthHealthy:
+				run.Stats.Healthy++
+			case storage.HealthBroken:
+				run.Stats.Broken++
+			default:
+				run.Stats.Unknown++
+			}
+			r.saveRun(run)
+			mu.Unlock()
+			if result.reason == "library_read_timeout" || result.reason == "library_io_busy" {
+				return fmt.Errorf("%s: audit stopped to avoid accumulating blocked filesystem reads", result.reason)
+			}
+			if autoRepair && h.Status == storage.HealthBroken {
+				// Several files may belong to the same torrent. Preserve serial
+				// restoration/submission while allowing unrelated probes to run.
+				repairMu.Lock()
+				if probeCtx.Err() == nil {
+					r.healBrokenEntry(probeCtx, run, &mu, h)
+				}
+				repairMu.Unlock()
+			}
+			return nil
+		})
 	}
+	err = g.Wait()
 	if ctx.Err() != nil {
 		r.finishCancelledRepairSweep(ctx, run, stop, autoRepair, "library audit cancelled", names)
+		return
+	}
+	if err != nil {
+		r.finalizeRun(run, storage.RepairRunFailed, err.Error(), "")
 		return
 	}
 	r.finalizeRun(run, storage.RepairRunCompleted, "", "")

@@ -40,6 +40,7 @@ func (s *Server) WebRoutes() http.Handler {
 		r.Get("/download", s.DownloadHandler)
 		r.Get("/repair", s.RepairHandler)
 		r.Get("/repair/reacquire", s.ReacquireHandler)
+		r.Get("/repair/library", s.LibraryRepairHandler)
 		r.Get("/stats", s.StatsHandler)
 		r.Get("/settings", s.ConfigHandler)
 
@@ -60,6 +61,11 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Get("/arr/bindings", s.handleSearchArrBindings)
 
 			// Repair / health-checker operations
+			r.Get("/repair/library", s.handleLibraryIncidents)
+			r.Post("/repair/library/action", s.handleLibraryIncidentAction)
+			r.Get("/repair/library/media", s.handleLibraryMediaLink)
+			r.Post("/arr/reacquire/jobs/{id}/retry", s.handleRetryRecoveryJob)
+			r.Post("/arr/reacquire/jobs/{id}/pause", s.handlePauseRecoveryJob)
 			r.Get("/repair/config", s.handleGetRepairConfig)
 			r.Put("/repair/config", s.handleUpdateRepairConfig)
 			r.Get("/repair/status", s.handleRepairStatus)

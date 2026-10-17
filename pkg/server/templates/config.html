@@ -1722,7 +1722,8 @@ fe80::/10</textarea>
                                     <span class="font-medium">Workers</span>
                                 </label>
                                 <input type="number" min="1" class="input w-full" name="repair.workers"
-                                       id="repair.workers" value="50">
+                                       id="repair.workers" value="5">
+                                <span class="label-text-alt opacity-70">Concurrent probes for both the Health Checker and library audit. Start low for library reads; Repair queue settings separately control Arr recovery jobs.</span>
                             </div>
 
                             <div>
@@ -1764,6 +1765,12 @@ fe80::/10</textarea>
                                 <label class="form-control"><span class="label-text">Pause between batches</span><input class="input w-full" id="repair.queue_batch_pause" name="repair.queue_batch_pause" placeholder="5m"></label>
                                 <label class="form-control"><span class="label-text">Maximum in-flight repair jobs</span><input class="input w-full" type="number" min="1" id="repair.queue_max_active" name="repair.queue_max_active" placeholder="10"></label>
                             </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="form-control"><span class="label-text">Search timeout</span><input class="input w-full" name="repair.queue_search_timeout" id="repair.queue_search_timeout" placeholder="5m"></label>
+                                <label class="form-control"><span class="label-text">Grace after completed search</span><input class="input w-full" name="repair.queue_search_grace" id="repair.queue_search_grace" placeholder="2m"></label>
+                                <label class="form-control"><span class="label-text">Retry delays (comma-separated)</span><input class="input w-full" name="repair.queue_retry_delays" id="repair.queue_retry_delays" placeholder="6h,24h,72h"></label>
+                            </div>
+                            <p class="text-xs opacity-70">Deferred jobs release active slots. Each retry respects the interval and batch limits. After the configured retries, manual attention is required. A timeout never means no results.</p>
                             <label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.queue_paused" name="repair.queue_paused"><span class="label-text">Pause new repair dispatches</span></label>
                         </div>
 

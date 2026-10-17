@@ -78,22 +78,7 @@ func New(mgr *manager.Manager) *Server {
 
 	cfg := config.Get()
 
-	templates := template.Must(template.ParseFS(
-		content,
-		"templates/layout.html",
-		"templates/setup_layout.html",
-		"templates/index.html",
-		"templates/download.html",
-		"templates/repair.html",
-		"templates/reacquire.html",
-		"templates/repair_tabs.html",
-		"templates/stats.html",
-		"templates/config.html",
-		"templates/browse.html",
-		"templates/login.html",
-		"templates/register.html",
-		"templates/setup.html",
-	))
+	templates := template.Must(loadTemplates())
 	cookieStore := sessions.NewCookieStore([]byte(cfg.SecretKey()))
 	cookieStore.Options = &sessions.Options{
 		Path:     "/",
@@ -258,4 +243,24 @@ func (s *Server) getRcloneLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("error stremaing file %s", err), http.StatusInternalServerError)
 		return
 	}
+}
+
+func loadTemplates() (*template.Template, error) {
+	return template.ParseFS(
+		content,
+		"templates/layout.html",
+		"templates/setup_layout.html",
+		"templates/index.html",
+		"templates/download.html",
+		"templates/repair.html",
+		"templates/reacquire.html",
+		"templates/library_repair.html",
+		"templates/repair_tabs.html",
+		"templates/stats.html",
+		"templates/config.html",
+		"templates/browse.html",
+		"templates/login.html",
+		"templates/register.html",
+		"templates/setup.html",
+	)
 }

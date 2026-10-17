@@ -58,12 +58,17 @@ auto-repair and stop schedule apply. The source and torrent/NZB protocol filters
 do not apply: this mode checks the imported paths regardless of their original
 transport. Counts represent individual library files rather than torrent folders.
 
-Reads run sequentially, with a 30-second deadline and 500 ms between files.
+Reads use `repair.workers` concurrent workers (default 5), with a 30-second
+per-file deadline and no fixed delay between files. Start with a small worker
+count: mount read-ahead can transfer more than the 64 KiB sample. Automatic
+restoration and recovery submission remain serial; Arr recovery dispatch is
+paced separately by the Repair queue settings.
 The mount must be available before probing starts (the built-in DFS mount must
 also expose its `version.txt` marker). An unavailable library parent directory,
 permission error or other inconclusive I/O result is **unknown**, not repairable.
-A timeout stops the audit; no further filesystem worker can start while an older
-read remains blocked, including on subsequent runs.
+A timeout stops dispatch and cancels the other probes. Filesystem calls still
+blocked retain their worker slots, including across subsequent runs and changes
+to the worker setting, until they return.
 
 A missing target, a file smaller than the sample, an incomplete read, or an HTML/XML
 error document becomes **broken** only if confirmed by a
@@ -121,15 +126,59 @@ New automatic repair jobs share a global dispatch policy across Sonarr and Radar
 | `repair.queue_interval` | `10s` | Minimum time between new repair dispatch slots. |
 | `repair.queue_batch_size` | `50` | Dispatch slots per batch. |
 | `repair.queue_batch_pause` | `5m` | Minimum cooldown after each batch, measured from its last dispatch. `0s` disables the extra cooldown. |
-| `repair.queue_max_active` | `10` | Maximum started, nonterminal repair jobs, including jobs waiting for grab/download/import or needing attention. |
-| `repair.queue_paused` | `false` | Hold new repair jobs in the queue. |
+| `repair.queue_max_active` | `10` | Maximum active repair jobs, including searches and pending downloads/imports. Deferred retries and jobs needing attention do not occupy a slot. |
+| `repair.queue_paused` | `false` | Hold new repair jobs and scheduled retries in the queue. |
+| `repair.queue_search_timeout` | `5m` | Bound an Arr recovery attempt; a long-running remote search is quarantined instead of duplicated. |
+| `repair.queue_search_grace` | `2m` | Observe grabs/imports for this long after a confirmed completed search. |
+| `repair.queue_retry_delays` | `6h,24h,72h` | Delays after successive searches that produced no replacement download; at most 10 delays, each between 1 minute and 168 hours. |
 
 The existing worker runs one Arr operation at a time. Once a job has requested a
-replacement, it continues to occupy an in-flight slot until it completes, fails,
-or is cancelled. Jobs waiting for dispatch do not expire as pending imports.
+replacement, it occupies a slot while the search/download/import is active.
+A completed search with no observed replacement is rescheduled and releases its
+slot. Jobs requiring manual attention also release their global slot, while
+retaining their media/season guard against duplicate work. Jobs waiting for dispatch do not expire as pending imports.
 Backlogs are kept in the job database and continue automatically when a slot is
 available. A queued orphan already covered by an earlier import can consume a
 dispatch slot for verification, but causes no additional search.
+
+An independent observer checks explicit Arr command receipts, grab history, the
+Arr queue, and imported file identities. A completed command alone does not prove
+that no release exists: the displayed outcome is **search completed without a
+replacement download**, after the grace period. Missing commands, API failures,
+and timeouts remain unknown/error outcomes. Searches beyond their deadline need
+attention; downloads/imports without progress for six hours also release their
+slot and need attention. Download progress extends that stall deadline.
+
+Scheduled retries persist across restart and use the same interval, batch, and
+capacity controls as first attempts. Before another search, a read-only preflight
+checks for a late download/import. Safe local search errors use shorter delays
+(1, 5, then 30 minutes); uncertain remote mutations keep their reconciliation
+receipts and are never blindly replayed. After the configured automatic retries,
+the job remains visible for manual attention. **Retry now** makes a safe retry
+eligible without bypassing dispatch limits.
+
+### Library repair tracking
+
+**Repair → Library repair** shows audit incidents with diagnosis, recovery state,
+retry count, next eligible attempt, and per-file actions. It groups Sonarr files
+by season, supports filtering/search/pagination, and retains findings when Arr
+removes an old file during replacement. **Recheck**, **Repair**, **Retry now**, and
+**Suspend/Resume** act on the selected incident. Suspension stops future attempts;
+it does not cancel a download already running. Ambiguous remote actions are
+reviewed/acknowledged in **Arr Reacquisition** before starting other work.
+
+The observer attempts a library read after detecting a replacement import, when
+the auditor is idle. Otherwise the next audit or **Recheck** validates it. An Arr
+import is shown separately from **Readable**; only a successful read resolves the
+incident. Recovery history is retained until explicitly removed through the
+existing job-history controls.
+
+Media links use the real Arr title slug. Set the optional **Browser URL** on each
+Arr when its internal Docker hostname is inaccessible from your browser, for
+example `https://sonarr.example.com/sonarr`. The API host stays unchanged.
+
+Audit status and recovery status poll independently with a 10-second request
+limit, automatic retries, and the last successful snapshot retained on errors.
 
 Pause/resume is available in **Arr Reacquisition**, alongside queued/in-flight
 counts and the next dispatch time. It holds new repair dispatches without stopping
@@ -190,6 +239,9 @@ totals. Unavailable progress is marked stale and retried automatically.
     "queue_batch_pause": "5m",
     "queue_max_active": 10,
     "queue_paused": false,
+    "queue_search_timeout": "5m",
+    "queue_search_grace": "2m",
+    "queue_retry_delays": "6h,24h,72h",
     "verify_content": false,
     "notify_on_complete": false,
     "nntp_connection_percent": 20,
@@ -208,7 +260,7 @@ totals. Unavailable progress is marked stale and retried automatically.
 | `recheck_interval`        | How long a healthy entry's check stays fresh before it becomes a candidate again.        | `168h`      |
 | `arrs`                    | Optional filter when `source=arr`. Empty list means all eligible Arrs.                   | `[]`        |
 | `auto_repair`             | When `true`, broken Arr-managed files are deleted through Arr and searched again. When `false`, the sweep is detect-only. | `false` |
-| `library_audit`           | Use sequential library-path sample reads instead of provider entry probes for scheduled runs. | `false` |
+| `library_audit`           | Use concurrent library-path sample reads instead of provider entry probes for scheduled runs. | `false` |
 | `verify_content`          | During NZB probes, also read each media file's head through the streaming stack and check for a valid container signature. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed. | `false` |
 | `notify_on_complete`      | Send a notification when a sweep finishes.                                               | `false`     |
 | `nntp_connection_percent` | Percentage of NNTP connections the probe is allowed to use. Avoids starving downloads.   | `20`        |

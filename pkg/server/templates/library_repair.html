@@ -1,0 +1,21 @@
+{{define "library_repair"}}
+<div class="container mx-auto px-4 py-6 space-y-5">
+ {{template "repair_tabs" .}}
+ <div class="flex flex-wrap gap-3 justify-between items-center">
+  <div><h1 class="text-2xl font-bold">Library repair</h1><p class="text-sm opacity-70">Audit findings and their recovery history. Imported files are resolved after a successful read.</p></div>
+  <button id="libraryRefresh" class="btn btn-sm btn-outline">Refresh</button>
+ </div>
+ <p id="libraryStatus" role="status" class="text-sm">Loading library findings…</p>
+ <div class="flex flex-wrap gap-3">
+  <label class="form-control"><span class="label">View</span><select id="libraryFilter" class="select"><option value="all">All findings</option><option value="pending">To repair</option><option value="active">In progress</option><option value="attention">Needs attention</option><option value="resolved">Resolved</option></select></label>
+  <label class="form-control grow"><span class="label">Search</span><input id="libraryQuery" class="input w-full" type="search" placeholder="Title, path, Arr…"></label>
+ </div>
+ <div class="overflow-x-auto bg-base-100 rounded-box">
+  <table class="table table-sm"><thead><tr><th>Media / season</th><th>Diagnosis</th><th>Recovery</th><th>Retries</th><th>Next eligible attempt</th><th>Actions</th></tr></thead><tbody id="libraryRows"></tbody></table>
+ </div>
+ <div class="flex justify-between items-center gap-3"><span id="libraryPageInfo" class="text-sm"></span><div class="join"><button id="libraryPrev" class="btn btn-sm join-item">Previous</button><button id="libraryNext" class="btn btn-sm join-item">Next</button></div></div>
+ <p class="text-xs opacity-70">Retry now respects queue limits and checks for a late download before searching again. Suspend stops future attempts; existing downloads continue. Media links use the Arr Browser URL when configured.</p>
+ <dialog id="libraryDetails" class="modal"><div class="modal-box max-w-3xl"><h2 class="font-bold text-lg">Recovery details</h2><pre id="libraryDetailsBody" class="whitespace-pre-wrap break-all text-xs mt-4"></pre><form method="dialog" class="modal-action"><button class="btn">Close</button></form></div></dialog>
+</div>
+<script>document.addEventListener('DOMContentLoaded',()=>{window.libraryRepair=new LibraryRepairManager();});</script>
+{{end}}

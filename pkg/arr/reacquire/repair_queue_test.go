@@ -251,7 +251,7 @@ func TestRepairQueueProgressIncludesOnlyRetainedRepairJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	progress := service.RepairQueueStatus()
-	if progress.Total != len(statuses) || progress.Queued != 1 || progress.InFlight != 5 {
+	if progress.Total != len(statuses) || progress.Queued != 1 || progress.InFlight != 4 {
 		t.Fatalf("progress mixes pending, terminal, or manual jobs: %+v", progress)
 	}
 	for _, status := range statuses {

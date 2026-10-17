@@ -53,3 +53,29 @@ for (const asset of ['js', 'build/js']) {
         assert.doesNotMatch(rows[1].innerHTML, /<td>1668<\/td>/);
     });
 }
+
+for (const asset of ['js', 'build/js']) {
+    test(`${asset}: recovery polling continues independently of a hung audit status`, async () => {
+        const {manager,elements,timers}=harness(asset);
+        let release;
+        manager.renderStatus = () => {};
+        manager.fetchJSON = url => url.endsWith('/repair/status')
+            ? new Promise(resolve => {release=resolve;})
+            : Promise.resolve({queued:0,in_flight:0,max_active:10,total:1,status_counts:{retry_scheduled:1}});
+        const status=manager.loadStatus();
+        await manager.pollRecovery();
+        assert.equal(manager.statusLoading,true);
+        assert.equal(manager.recoveryLoading,false);
+        assert.match(elements.get('recoveryQueueLine').textContent,/0\/10 active/);
+        assert.equal(timers.at(-1),5000);
+        release({});await status;
+    });
+    test(`${asset}: failed recovery poll schedules another refresh`,async()=>{
+        const {manager,elements,timers}=harness(asset);
+        manager.fetchJSON=async()=>{throw new Error('timeout');};
+        await manager.pollRecovery();
+        assert.equal(manager.recoveryLoading,false);
+        assert.equal(timers.at(-1),5000);
+        assert.match(elements.get('recoveryQueueLine').textContent,/unavailable|out of date/i);
+    });
+}

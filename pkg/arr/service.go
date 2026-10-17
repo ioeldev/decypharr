@@ -174,6 +174,7 @@ func (s *Service) SyncToConfig() []config.Arr {
 		}
 		existing.Token = cmp.Or(existing.Token, instance.Token)
 		existing.SkipRepair = instance.SkipRepair
+		existing.BrowserURL = instance.BrowserURL
 		existing.DownloadUncached = instance.DownloadUncached
 		existing.SelectedDebrid = instance.SelectedDebrid
 		merged[instance.Name] = existing

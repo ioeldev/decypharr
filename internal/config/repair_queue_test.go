@@ -21,3 +21,19 @@ func TestRepairQueuePolicyDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("explicit settings lost: %+v %v", p, err)
 	}
 }
+
+func TestRecoveryTimingValidation(t *testing.T) {
+	p, err := (RepairConfig{}).QueuePolicy()
+	if err != nil || p.SearchTimeout != 5*time.Minute || p.SearchGrace != 2*time.Minute || len(p.RetryDelays) != 3 || p.RetryDelays[2] != 72*time.Hour {
+		t.Fatalf("defaults: %+v %v", p, err)
+	}
+	for _, r := range []RepairConfig{{QueueSearchTimeout: "0s"}, {QueueSearchGrace: "25h"}, {QueueRetryDelays: "6h,bad"}, {QueueRetryDelays: "30s"}, {QueueRetryDelays: "169h"}} {
+		if _, err := r.QueuePolicy(); err == nil {
+			t.Fatalf("accepted %+v", r)
+		}
+	}
+	p, err = (RepairConfig{QueueSearchTimeout: "3m", QueueSearchGrace: "30s", QueueRetryDelays: "1h, 12h"}).QueuePolicy()
+	if err != nil || len(p.RetryDelays) != 2 || p.RetryDelays[1] != 12*time.Hour {
+		t.Fatalf("configured: %+v %v", p, err)
+	}
+}

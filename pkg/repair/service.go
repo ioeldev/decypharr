@@ -101,33 +101,36 @@ type Service struct {
 	hearsay       *hearsay.Service
 	logger        zerolog.Logger
 
-	// One filesystem probe may remain blocked in FUSE after cancellation.
-	// Keep its slot occupied across runs until the syscall returns.
-	libraryProbeSlot chan struct{}
-	mu               sync.Mutex
-	parentCtx        context.Context
-	activeRunID      string
-	cancelRun        context.CancelFunc
-	scheduled        bool
-	stopScheduled    bool
-	activeStopFunc   func()
-	runWG            sync.WaitGroup
+	// Filesystem probes may remain blocked in FUSE after cancellation.
+	// Account for them across runs until their syscalls return.
+	auditControlMu      sync.Mutex
+	libraryProbeMu      sync.Mutex
+	libraryProbeActive  int
+	libraryProbeChanged chan struct{}
+	mu                  sync.Mutex
+	parentCtx           context.Context
+	activeRunID         string
+	cancelRun           context.CancelFunc
+	scheduled           bool
+	stopScheduled       bool
+	activeStopFunc      func()
+	runWG               sync.WaitGroup
 }
 
 // New builds a repair service from its dependencies.
 func New(deps Dependencies) *Service {
 	return &Service{
-		scheduler:        deps.Scheduler,
-		backend:          deps.Backend,
-		storage:          deps.Storage,
-		arrs:             deps.Arrs,
-		reacquirer:       deps.Reacquirer,
-		usenet:           deps.Usenet,
-		notifications:    deps.Notifications,
-		hearsay:          deps.Hearsay,
-		logger:           logger.New("repair"),
-		parentCtx:        context.Background(),
-		libraryProbeSlot: make(chan struct{}, 1),
+		scheduler:           deps.Scheduler,
+		backend:             deps.Backend,
+		storage:             deps.Storage,
+		arrs:                deps.Arrs,
+		reacquirer:          deps.Reacquirer,
+		usenet:              deps.Usenet,
+		notifications:       deps.Notifications,
+		hearsay:             deps.Hearsay,
+		logger:              logger.New("repair"),
+		parentCtx:           context.Background(),
+		libraryProbeChanged: make(chan struct{}),
 	}
 }
 

@@ -231,7 +231,7 @@ func TestReconcileImportedManagedJobs(t *testing.T) {
 			}
 			service.reconcileImportedJobs(t.Context())
 			updated, _ := service.Job(job.ID)
-			if tc.ready && updated.Status != StatusReady || !tc.ready && !updated.Status.waiting() {
+			if tc.ready && updated.Status != StatusReady || !tc.ready && !updated.Status.waiting() && updated.Status != StatusNeedsAttention {
 				t.Fatalf("status = %s, imported = %v", updated.Status, tc.ready)
 			}
 			wantRequests := int64(1)
@@ -246,7 +246,7 @@ func TestReconcileImportedManagedJobs(t *testing.T) {
 			}
 			service.maintainJobs()
 			updated, _ = service.Job(job.ID)
-			want := StatusFailed
+			want := StatusNeedsAttention
 			if tc.ready {
 				want = StatusReady
 			}

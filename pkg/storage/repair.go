@@ -223,6 +223,8 @@ type BrokenFile struct {
 	ArrName        string  `json:"arr_name,omitempty"`
 	ArrKind        ArrKind `json:"arr_kind,omitempty"`
 	MediaID        int     `json:"media_id,omitempty"`
+	EpisodeIDs     []int   `json:"episode_ids,omitempty"`
+	SeasonNumber   int     `json:"season_number,omitempty"`
 	EpisodeID      int     `json:"episode_id,omitempty"`
 	ArrFileID      int     `json:"arr_file_id,omitempty"`
 	TargetPath     string  `json:"target_path,omitempty"`
@@ -239,14 +241,16 @@ type EntryHealth struct {
 	EntryName   string `json:"entry_name"`
 	DisplayName string `json:"display_name,omitempty"`
 	// LibraryFile retains identity for rechecks, even after a successful read.
-	LibraryFile   *BrokenFile     `json:"library_file,omitempty"`
-	Protocol      config.Protocol `json:"protocol,omitempty"`
-	Status        HealthStatus    `json:"status"`
-	Fingerprint   string          `json:"fingerprint,omitempty"`
-	FileCount     int             `json:"file_count"`
-	BrokenCount   int             `json:"broken_count"`
-	BrokenFiles   []BrokenFile    `json:"broken_files,omitempty"`
-	FailureReason string          `json:"failure_reason,omitempty"`
+	LibraryPaused  bool            `json:"library_paused,omitempty"`
+	LibraryRemoved bool            `json:"library_removed,omitempty"`
+	LibraryFile    *BrokenFile     `json:"library_file,omitempty"`
+	Protocol       config.Protocol `json:"protocol,omitempty"`
+	Status         HealthStatus    `json:"status"`
+	Fingerprint    string          `json:"fingerprint,omitempty"`
+	FileCount      int             `json:"file_count"`
+	BrokenCount    int             `json:"broken_count"`
+	BrokenFiles    []BrokenFile    `json:"broken_files,omitempty"`
+	FailureReason  string          `json:"failure_reason,omitempty"`
 
 	Dirty       bool   `json:"dirty"`
 	DirtyReason string `json:"dirty_reason,omitempty"`

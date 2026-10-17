@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 
@@ -182,10 +183,11 @@ func (s *Server) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) RepairHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]any{
-		"URLBase":    cfg.URLBase,
-		"Page":       "repair",
-		"Title":      "Repair",
-		"SetupError": cfg.SetupError(),
+		"URLBase":              cfg.URLBase,
+		"Page":                 "repair",
+		"Title":                "Repair",
+		"RecoveryAssetVersion": recoveryAssetVersion(),
+		"SetupError":           cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
 	if err != nil {
@@ -196,10 +198,11 @@ func (s *Server) RepairHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ReacquireHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]any{
-		"URLBase":    cfg.URLBase,
-		"Page":       "reacquire",
-		"Title":      "Reacquire",
-		"SetupError": cfg.SetupError(),
+		"URLBase":              cfg.URLBase,
+		"Page":                 "reacquire",
+		"Title":                "Reacquire",
+		"RecoveryAssetVersion": recoveryAssetVersion(),
+		"SetupError":           cfg.SetupError(),
 	}
 	if err := s.templates.ExecuteTemplate(w, "layout", data); err != nil {
 		s.logger.Warn().Err(err).Msg("error rendering /reacquire template")
@@ -209,10 +212,11 @@ func (s *Server) ReacquireHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]any{
-		"URLBase":    cfg.URLBase,
-		"Page":       "config",
-		"Title":      "Config",
-		"SetupError": cfg.SetupError(),
+		"URLBase":              cfg.URLBase,
+		"Page":                 "config",
+		"RecoveryAssetVersion": recoveryAssetVersion(),
+		"Title":                "Config",
+		"SetupError":           cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
 	if err != nil {
@@ -244,5 +248,21 @@ func (s *Server) BrowseHandler(w http.ResponseWriter, r *http.Request) {
 	err := s.templates.ExecuteTemplate(w, "layout", data)
 	if err != nil {
 		s.logger.Warn().Err(err).Msg("error rendering /browse template")
+	}
+}
+
+func recoveryAssetVersion() string {
+	h := sha256.New()
+	for _, name := range []string{"repair", "reacquire", "library-repair", "config"} {
+		b, _ := assetsEmbed.ReadFile("assets/build/js/" + name + ".js")
+		h.Write(b)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)[:8])
+}
+func (s *Server) LibraryRepairHandler(w http.ResponseWriter, r *http.Request) {
+	cfg := config.Get()
+	data := map[string]any{"URLBase": cfg.URLBase, "Page": "library-repair", "Title": "Library repair", "SetupError": cfg.SetupError(), "RecoveryAssetVersion": recoveryAssetVersion()}
+	if err := s.templates.ExecuteTemplate(w, "layout", data); err != nil {
+		s.logger.Warn().Err(err).Msg("error rendering library repair")
 	}
 }

@@ -4,9 +4,10 @@
 // blocklist through to the replacement being imported.
 class ReacquireManager {
     static ACTIVE = ['queued', 'resolving', 'invalidating', 'blocklisting', 'searching'];
-    static WAITING = ['waiting_for_grab', 'waiting_for_download', 'waiting_for_import'];
+    static WAITING = ['retry_scheduled', 'waiting_for_grab', 'waiting_for_download', 'waiting_for_import'];
 
     static STATUS = {
+        retry_scheduled: {label: 'Retry scheduled', badge: 'badge-warning', icon: 'bi-clock'},
         queued: {label: 'Queued', badge: 'badge-ghost', icon: 'bi-hourglass'},
         resolving: {label: 'Resolving', badge: 'badge-info', icon: 'bi-search'},
         invalidating: {label: 'Deleting', badge: 'badge-info', icon: 'bi-trash3'},
@@ -72,24 +73,22 @@ class ReacquireManager {
     // === jobs ===
 
     async loadJobs() {
+        if (this.loadingJobs) return;
+        this.loadingJobs = true;
+        clearTimeout(this.timer);
         try {
             this.jobs = await this.fetchJSON(`${this.api}/arr/reacquire/jobs`) || [];
-        } catch (e) {
-            this.jobs = [];
-            this.selectedJobIds.clear();
+            const deletableIds = new Set(this.jobs.filter(job => this.isTerminal(job.status)).map(job => job.id));
+            this.selectedJobIds.forEach(id => {if (!deletableIds.has(id)) this.selectedJobIds.delete(id);});
             this.renderCounts();
-            this.setStatusLine('Reacquisition service is unavailable.');
             this.renderJobs();
-            return;
+            await this.loadRepairQueue();
+        } catch (e) {
+            this.setStatusLine('Reacquisition status unavailable; showing the last snapshot and retrying automatically.');
+        } finally {
+            this.loadingJobs = false;
+            this.scheduleNextPoll();
         }
-        const deletableIds = new Set(this.jobs.filter((job) => this.isTerminal(job.status)).map((job) => job.id));
-        this.selectedJobIds.forEach((id) => {
-            if (!deletableIds.has(id)) this.selectedJobIds.delete(id);
-        });
-        this.renderCounts();
-        this.renderJobs();
-        await this.loadRepairQueue();
-        this.scheduleNextPoll();
     }
 
     async loadRepairQueue() {
@@ -122,9 +121,7 @@ class ReacquireManager {
     scheduleNextPoll() {
         clearTimeout(this.timer);
         const working = this.jobs.some((job) => !this.isTerminal(job.status) && job.status !== 'needs_attention');
-        if (working) {
-            this.timer = setTimeout(() => this.loadJobs(), 5000);
-        }
+        this.timer = setTimeout(() => this.loadJobs(), working ? 5000 : 15000);
     }
 
     isTerminal(status) {
@@ -673,9 +670,13 @@ class ReacquireManager {
     }
 
     async fetchJSON(url) {
-        const res = await fetch(url, {credentials: 'same-origin'});
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        try {
+            const res = await fetch(url, {credentials: 'same-origin', signal: controller.signal});
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        } finally { clearTimeout(timer); }
     }
 
     formatTime(value) {

@@ -184,6 +184,14 @@ func (r *Service) saveRun(run *storage.RepairRun) {
 }
 
 func (r *Service) saveHealth(state *storage.EntryHealth) {
+	r.auditControlMu.Lock()
+	defer r.auditControlMu.Unlock()
+	if state.LibraryFile != nil {
+		if old, err := r.storage.GetEntryHealth(state.EntryName); err == nil {
+			state.LibraryPaused = old.LibraryPaused
+		}
+	}
+
 	if err := r.storage.SaveEntryHealth(state); err != nil {
 		r.logger.Trace().Err(err).Str("entry", state.EntryName).Msg("Failed to persist entry health")
 	}
