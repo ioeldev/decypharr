@@ -133,3 +133,25 @@ func (s *Server) handleLibraryMediaLink(w http.ResponseWriter, r *http.Request) 
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
+
+// Metadata is loaded separately from job polling, only for visible media.
+func (s *Server) handleArrMediaDetails(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.URL.Query().Get("media"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid media ID", 400)
+		return
+	}
+	service := s.manager.Arr()
+	if service == nil {
+		http.Error(w, "Arr unavailable", 503)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	details, err := service.MediaDisplayDetails(ctx, r.URL.Query().Get("arr"), r.URL.Query().Get("fingerprint"), id)
+	if err != nil {
+		http.Error(w, "Media details unavailable", http.StatusBadGateway)
+		return
+	}
+	utils.JSONResponse(w, details, http.StatusOK)
+}

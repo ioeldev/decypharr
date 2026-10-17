@@ -190,6 +190,81 @@ class ReacquireManager {
         };
     }
 
+    mediaKey(binding) {
+        return JSON.stringify([binding.arrName,binding.arrInstanceFingerprint,binding.arrType,binding.movieId||binding.seriesId]);
+    }
+
+    // Paths provide an immediate label, including for jobs created before this UI.
+    // Arr metadata supplies authoritative episode numbers (especially for anime).
+    bindingMedia(binding, job={}) {
+        const parts=(binding.libraryPath||'').replace(/\\/g,'/').split('/').filter(Boolean);
+        const filename=parts.at(-1)||binding.entryFileName||'';
+        const parent=parts.at(-2)||'';
+        const seasonFolder=/^(?:(?:season|saison)\s+\d+|specials)$/i.test(parent);
+        const series=binding.arrType==='sonarr';
+        const cached=this.mediaLabels?.get(this.mediaKey(binding))?.data;
+        let title=cached?.title || (series&&seasonFolder?parts.at(-3):parent);
+        if(!title) {
+            title=(binding.entryFileName||binding.entryName||'').replace(/\.[^.]+$/,'');
+            if(series)title=title.split(/(?:^|[ ._-])S\d+[ ._-]*E\d+|(?:^|[ ._-])\d+x\d+/i)[0];
+            title=title.replace(/[._]+/g,' ').trim() || 'Media unavailable';
+        }
+        let episode='';
+        if(series) {
+            const pad=n=>String(n).padStart(2,'0');
+            const ids=new Set(binding.episodeIds||[]);
+            const episodes=(cached?.episodes||[]).filter(e=>ids.has(e.id))
+                .sort((a,b)=>a.seasonNumber-b.seasonNumber||a.episodeNumber-b.episodeNumber);
+            if(episodes.length) {
+                episode=[...new Set(episodes.map(e=>`S${pad(e.seasonNumber)}E${pad(e.episodeNumber)}`))].join(', ');
+                if(episodes.length<ids.size)episode+=' · other episodes unavailable';
+            } else {
+                const match=filename.match(/(?:^|[ ._-])(S\d+[ ._-]*E\d+(?:(?:[ ._-]*E|[ ._-]*-[ ._-]*E?)\d+)*)(?=$|[ ._-])/i);
+                const alternate=filename.match(/(?:^|[ ._-])(\d+)x(\d+)(?=$|[ ._-])/i);
+                if(match)episode=match[1].replace(/[ ._]/g,'').toUpperCase();
+                else if(alternate)episode=`S${pad(Number(alternate[1]))}E${pad(Number(alternate[2]))}`;
+                else {
+                    const folderSeason=parent.match(/^(?:season|saison)\s+(\d+)$/i);
+                    const season=binding.seasonNumber??(folderSeason?Number(folderSeason[1]):null);
+                    episode=season===null?'Episode unavailable':`Season ${season} · episode unavailable`;
+                }
+            }
+        }
+        const media=binding.movieId||binding.seriesId;
+        const url=media>0&&binding.arrName&&['sonarr','radarr'].includes(binding.arrType)
+            ? `${this.api}/repair/library/media?arr=${encodeURIComponent(binding.arrName)}&media=${encodeURIComponent(media)}` : '';
+        return {title,episode,filename,url,label:episode?`${title} · ${episode}`:title};
+    }
+
+    mediaHTML(binding,job={}) {
+        const media=this.bindingMedia(binding,job);
+        const title=this.escape(media.label);
+        return `<div class="mb-1"><div class="font-medium break-words">${media.url?`<a class="link link-hover" href="${this.escapeAttr(media.url)}" target="_blank" rel="noopener noreferrer" title="Open in ${binding.arrType==='sonarr'?'Sonarr':'Radarr'}">${title} ↗</a>`:title}</div>${media.filename?`<div class="truncate text-xs opacity-60" title="${this.escapeAttr(media.filename)}">${this.escape(media.filename)}</div>`:''}</div>`;
+    }
+
+    loadVisibleMedia(jobs) {
+        this.mediaLabels??=new Map();
+        this.mediaLoading??=new Set();
+        for(const job of jobs) for(const binding of job.bindings||[]) {
+            if(this.mediaLoading.size>=2)return;
+            const media=binding.movieId||binding.seriesId;
+            if(!media||!binding.arrName||!['sonarr','radarr'].includes(binding.arrType))continue;
+            const key=this.mediaKey(binding), old=this.mediaLabels.get(key);
+            if(this.mediaLoading.has(key)||(old&&old.until>Date.now()))continue;
+            this.mediaLoading.add(key);
+            const url=`${this.api}/arr/media/details?arr=${encodeURIComponent(binding.arrName)}&media=${encodeURIComponent(media)}&fingerprint=${encodeURIComponent(binding.arrInstanceFingerprint||'')}`;
+            this.fetchJSON(url).then(data=>{
+                this.mediaLabels.set(key,{data,until:Date.now()+300000});
+            }).catch(()=>{
+                // Keep the path label or last successful metadata during Arr outages.
+                this.mediaLabels.set(key,{data:old?.data,until:Date.now()+60000});
+            }).finally(()=>{
+                this.mediaLoading.delete(key);
+                this.renderJobs();
+            });
+        }
+    }
+
     renderJobs() {
         const body = document.getElementById('jobsTableBody');
         if (!body) return;
@@ -208,8 +283,8 @@ class ReacquireManager {
 
         body.innerHTML = page.jobs.map((job) => {
             const binding = (job.bindings || [])[0] || {};
-            const file = binding.entryFileName || job.fileId || '-';
-            const entry = binding.entryName || '';
+            const file = this.bindingMedia(binding,job).label;
+            const bindings = job.bindings?.length ? job.bindings : [binding];
             const deletable = this.isTerminal(job.status);
             const id = this.escapeAttr(job.id);
             return `
@@ -222,8 +297,8 @@ class ReacquireManager {
                     </td>
                     <td>${this.statusBadge(job.status)}</td>
                     <td class="max-w-xs">
-                        <div class="truncate font-medium" title="${this.escapeAttr(file)}">${this.escape(file)}</div>
-                        ${entry ? `<div class="truncate text-xs opacity-60" title="${this.escapeAttr(entry)}">${this.escape(entry)}</div>` : ''}
+                        ${bindings.slice(0,3).map(b=>this.mediaHTML(b,job)).join('')}
+                        ${bindings.length>3?`<div class="text-xs opacity-60">+${bindings.length-3} files · see details</div>`:''}
                     </td>
                     <td>
                         <div class="text-sm">${this.escape(job.arrName || '-')}</div>
@@ -249,6 +324,7 @@ class ReacquireManager {
         });
         this.renderJobsPagination(page);
         this.updateJobSelectionUI(page.jobs);
+        this.loadVisibleMedia(page.jobs);
     }
 
     renderJobsPagination(page) {
@@ -428,7 +504,7 @@ class ReacquireManager {
 
         const bindings = (job.bindings || []).map((binding) => `
             <tr>
-                <td class="text-xs">${this.escape(binding.entryFileName || binding.entryFileId)}</td>
+                <td class="text-xs">${this.mediaHTML(binding,job)}</td>
                 <td class="text-xs">${binding.arrFileId || '-'}</td>
                 <td class="text-xs">${this.escape(binding.confidence || '-')}</td>
             </tr>`).join('');
