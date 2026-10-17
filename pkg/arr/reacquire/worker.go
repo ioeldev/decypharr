@@ -46,6 +46,11 @@ func (s *Service) Reacquire(request Request) (*Job, error) {
 }
 
 func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
+	// The health checker already tried reinserting the original torrent. Prefer
+	// a replacement season pack before falling back to Sonarr's episode search.
+	if binding.ArrType == arr.Sonarr && request.Cause == CauseRepair && (request.Strategy.normalized() == StrategyHistoryFailed || request.Strategy == StrategyCommandSearch) {
+		request.Strategy = StrategySeasonPackFirst
+	}
 	key := keyForBinding(binding)
 
 	s.jobsMu.Lock()

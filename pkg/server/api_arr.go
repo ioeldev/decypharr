@@ -159,8 +159,8 @@ func validateArrReacquireRequest(request reacquire.Request) string {
 		return "fileId is required"
 	case request.Cause != reacquire.CauseStream && request.Cause != reacquire.CauseRepair && request.Cause != reacquire.CauseManual:
 		return "cause must be stream, repair, or manual"
-	case request.Strategy != "" && request.Strategy != reacquire.StrategyHistoryFailed && request.Strategy != reacquire.StrategyInteractiveBest && request.Strategy != reacquire.StrategyCommandSearch:
-		return "strategy must be history_failed, interactive_best, or command_search"
+	case request.Strategy != "" && request.Strategy != reacquire.StrategyHistoryFailed && request.Strategy != reacquire.StrategyInteractiveBest && request.Strategy != reacquire.StrategyCommandSearch && request.Strategy != reacquire.StrategySeasonPackFirst:
+		return "strategy must be history_failed, interactive_best, command_search, or season_pack_first"
 	default:
 		return ""
 	}

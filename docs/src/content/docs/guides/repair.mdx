@@ -126,6 +126,40 @@ Background NNTP probes share the configured `nntp_connection_percent` pool so ac
 
 A failure to persist a single entry's health update is logged but never aborts the sweep.
 
+## Sonarr season-pack replacement policy
+
+In this fork, newly queued Sonarr health-check repairs use `season_pack_first`.
+For torrents, the health checker first attempts to reinsert the original torrent
+across the configured debrid providers. If that succeeds, no Arr replacement is
+queued. Reinsertion uses cached content; it does not enable uncached downloads.
+
+If reinsertion fails, the Arr job groups authoritative files sharing the original
+download ID, then deletes those files through Sonarr. It performs a season release
+lookup and accepts only eligible `fullSeason` releases for that series and season,
+in Sonarr's returned order. The original torrent is excluded when its infohash is
+available. Rejected releases and releases spanning multiple seasons are excluded.
+If no acceptable pack is returned, the job sends `EpisodeSearch` for the affected
+episode IDs. API failures or an uncertain grab outcome never trigger that fallback.
+
+This policy also tries a season pack when only one episode remains associated
+with the download. Jobs spanning multiple seasons fall back to `EpisodeSearch`.
+Missing episode IDs prevent an episode fallback. Only currently indexed files
+sharing the download are grouped; other copies of the season are not deleted.
+
+`season_pack_first` deliberately does not fail grab history or blocklist the old
+release: Sonarr's failed-download handling could otherwise launch a competing
+automatic search before the pack decision. The episode fallback uses Sonarr's
+normal selection rules. The existing `history_failed`, `command_search`, and
+`interactive_best` manual strategies remain available. A manual pack-first option
+is also available in Arr Reacquisition; it starts at replacement selection, without
+reinserting the original torrent. Radarr behavior is unchanged.
+
+Replacement remains asynchronous and does not resume a failed Plex playback.
+
+For a complete sweep every twelve hours, use `enabled: true`,
+`schedule: "0 */12 * * *"`, and `recheck_interval: "1s"`. A zero recheck interval
+falls back to seven days. Keep `auto_repair: true` to enable repair after detection.
+
 ## Stop and disable
 
 - **Stop** cancels the active run. In-flight probes return at the next checkpoint, the run is marked `cancelled`, and entries that hadn't yet finished probing revert to their previous status.

@@ -103,6 +103,7 @@ const (
 	StrategyHistoryFailed   Strategy = "history_failed"
 	StrategyInteractiveBest Strategy = "interactive_best"
 	StrategyCommandSearch   Strategy = "command_search"
+	StrategySeasonPackFirst Strategy = "season_pack_first"
 )
 
 func (strategy Strategy) normalized() Strategy {
@@ -114,7 +115,7 @@ func (strategy Strategy) normalized() Strategy {
 
 func (strategy Strategy) valid() bool {
 	strategy = strategy.normalized()
-	return strategy == StrategyHistoryFailed || strategy == StrategyInteractiveBest || strategy == StrategyCommandSearch
+	return strategy == StrategyHistoryFailed || strategy == StrategyInteractiveBest || strategy == StrategyCommandSearch || strategy == StrategySeasonPackFirst
 }
 
 type Status string

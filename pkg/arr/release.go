@@ -17,6 +17,12 @@ type Release struct {
 	Title               string             `json:"title"`
 	Indexer             string             `json:"indexer"`
 	IndexerID           int                `json:"indexerId"`
+	FullSeason          bool               `json:"fullSeason"`
+	SeasonNumber        *int               `json:"seasonNumber"`
+	SeasonNumbers       []int              `json:"seasonNumbers"`
+	MappedSeriesID      *int               `json:"mappedSeriesId"`
+	MappedSeasonNumber  *int               `json:"mappedSeasonNumber"`
+	InfoHash            string             `json:"infoHash"`
 	Approved            bool               `json:"approved"`
 	Rejected            bool               `json:"rejected"`
 	TemporarilyRejected bool               `json:"temporarilyRejected"`
