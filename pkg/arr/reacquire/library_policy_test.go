@@ -41,10 +41,20 @@ func TestUnindexedLibraryEpisodeUsesSeasonPackPolicy(t *testing.T) {
 	if job.Strategy != StrategySeasonPackFirst || len(job.Bindings) != 1 || job.Bindings[0].SeriesID != 7 || job.Bindings[0].SeasonNumber != 2 || len(job.Bindings[0].EpisodeIDs) != 1 || job.Bindings[0].EpisodeIDs[0] != 41 {
 		t.Fatalf("orphan episode job lost pack policy/identity: %+v", job)
 	}
-	if _, err := service.ReacquireLibraryFile(t.Context(), LibraryRequest{ArrName: "shows", ArrFileID: 43, LibraryPath: "/library/second.mkv", Cause: CauseRepair}); err == nil {
-		t.Fatal("second orphan queued a competing season-pack grab")
+	second, err := service.ReacquireLibraryFile(t.Context(), LibraryRequest{ArrName: "shows", ArrFileID: 43, LibraryPath: "/library/second.mkv", Cause: CauseRepair})
+	if err != nil || len(service.Jobs()) != 2 {
+		t.Fatalf("second orphan was not retained in the queue: %v", err)
 	}
-	if len(service.Jobs()) != 1 {
-		t.Fatal("duplicate season recovery job")
+	if _, err := service.updateJobDurable(job.ID, StatusWaitingForImport, nil); err != nil {
+		t.Fatal(err)
+	}
+	if next, ok := service.nextJob(); ok && next.ID == second.ID {
+		t.Fatal("competing orphan season recovery became dispatchable")
+	}
+	if _, err := service.updateJobDurable(job.ID, StatusReady, nil); err != nil {
+		t.Fatal(err)
+	}
+	if next, ok := service.nextJob(); !ok || next.ID != second.ID {
+		t.Fatal("queued orphan did not resume after the season recovered")
 	}
 }

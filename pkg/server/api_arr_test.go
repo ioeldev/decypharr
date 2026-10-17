@@ -1,9 +1,15 @@
 package server
 
 import (
+	"fmt"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/pkg/repair"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/sessions"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -29,6 +35,8 @@ func TestArrReacquireRoutesRequireAuthentication(t *testing.T) {
 		method string
 		path   string
 	}{
+		{method: http.MethodGet, path: "/api/arr/reacquire/queue"},
+		{method: http.MethodPost, path: "/api/arr/reacquire/queue"},
 		{method: http.MethodGet, path: "/api/arr/reacquire/jobs"},
 		{method: http.MethodGet, path: "/api/arr/reacquire/jobs/job-id"},
 		{method: http.MethodDelete, path: "/api/arr/reacquire/jobs"},
@@ -65,5 +73,53 @@ func TestValidateArrReacquireRequest(t *testing.T) {
 	valid.Strategy = "unknown"
 	if message := validateArrReacquireRequest(valid); message == "" {
 		t.Fatal("invalid strategy accepted")
+	}
+}
+
+func TestPausingRepairQueueDoesNotCancelAudit(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	mgr := manager.New()
+	t.Cleanup(func() { _ = mgr.Stop() })
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			fmt.Fprint(w, `[]`)
+		case <-r.Context().Done():
+		}
+	}))
+	defer remote.Close()
+	defer close(release)
+	mgr.Arr().AddOrUpdate(arr.Arr{Name: "movies", Host: remote.URL, Token: "test", Type: arr.Radarr})
+	id, err := mgr.Repair().RunNow(repair.RunOptions{LibraryAudit: new(true), AutoRepair: new(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("audit did not start")
+	}
+	server := &Server{manager: mgr}
+	response := httptest.NewRecorder()
+	server.handlePauseRepairQueue(response, httptest.NewRequest(http.MethodPost, "/api/arr/reacquire/queue", strings.NewReader(`{"paused":true}`)))
+	if response.Code != http.StatusOK || !config.Get().Repair.QueuePaused {
+		t.Fatalf("pause: %d %s", response.Code, response.Body.String())
+	}
+	active := mgr.Repair().Status().ActiveRun
+	if active == nil || active.ID != id {
+		t.Fatal("pausing the queue cancelled the running audit")
+	}
+	response = httptest.NewRecorder()
+	server.handlePauseRepairQueue(response, httptest.NewRequest(http.MethodPost, "/api/arr/reacquire/queue", strings.NewReader(`{"paused":false}`)))
+	if response.Code != http.StatusOK || config.Get().Repair.QueuePaused {
+		t.Fatal("resume was not saved")
 	}
 }

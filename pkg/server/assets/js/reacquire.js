@@ -37,6 +37,7 @@ class ReacquireManager {
 
     bind() {
         const $ = (id) => document.getElementById(id);
+        $('pauseRepairQueueBtn')?.addEventListener('click', () => this.toggleRepairQueue());
         $('refreshJobsBtn')?.addEventListener('click', () => this.loadJobs());
         $('refreshIndexBtn')?.addEventListener('click', () => this.refreshIndex());
         $('reacquireBtn')?.addEventListener('click', () => this.openReacquireModal());
@@ -87,7 +88,34 @@ class ReacquireManager {
         });
         this.renderCounts();
         this.renderJobs();
+        await this.loadRepairQueue();
         this.scheduleNextPoll();
+    }
+
+    async loadRepairQueue() {
+        const label = document.getElementById('repairQueueSummary');
+        const button = document.getElementById('pauseRepairQueueBtn');
+        try {
+            this.repairQueue = await this.fetchJSON(`${this.api}/arr/reacquire/queue`);
+            const q = this.repairQueue;
+            const next = q.next_allowed_at ? new Date(q.next_allowed_at) : null;
+            const wait = next && next > new Date() ? ` Next slot: ${next.toLocaleTimeString()}.` : '';
+            if (label) label.textContent = `Repair queue: ${q.queued} queued, ${q.in_flight}/${q.max_active} in flight. ${q.paused ? 'Paused.' : `${q.interval} minimum interval; batches of ${q.batch_size}, pause ${q.batch_pause}.`}${wait}${q.error ? ` ${q.error}` : ''}`;
+            if (button) { button.textContent = q.paused ? 'Resume repairs' : 'Pause repairs'; button.disabled = false; }
+        } catch (e) {
+            if (label) label.textContent = 'Repair queue status unavailable.';
+            if (button) button.disabled = true;
+        }
+    }
+
+    async toggleRepairQueue() {
+        const button = document.getElementById('pauseRepairQueueBtn');
+        if (button) button.disabled = true;
+        try {
+            const response = await fetch(`${this.api}/arr/reacquire/queue`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!this.repairQueue?.paused})});
+            if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+        } catch (e) { this.toast(`Queue update failed: ${e.message}`, 'error'); }
+        await this.loadRepairQueue();
     }
 
     scheduleNextPoll() {

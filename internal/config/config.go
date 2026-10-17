@@ -224,6 +224,11 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	LibraryAudit          bool         `json:"library_audit,omitempty"`
+	QueueInterval         string       `json:"queue_interval,omitempty"`
+	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
+	QueueBatchPause       string       `json:"queue_batch_pause,omitempty"`
+	QueueMaxActive        int          `json:"queue_max_active,omitempty"`
+	QueuePaused           bool         `json:"queue_paused,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
 	// the streaming stack and check for a valid container signature, catching
@@ -244,7 +249,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == ""
+		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && !r.QueuePaused
 }
 
 type Config struct {
@@ -366,6 +371,9 @@ func (c *Config) loadConfig() error {
 }
 
 func (c *Config) Validate() error {
+	if _, err := c.Repair.QueuePolicy(); err != nil {
+		return err
+	}
 	if err := validateDebrids(c.Debrids); err != nil {
 		return err
 	}

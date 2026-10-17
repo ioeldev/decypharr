@@ -45,6 +45,10 @@ type Service struct {
 	bindingRepository    *BindingRepository
 	jobRepository        *JobRepository
 	wake                 chan struct{}
+	repairQueueMu        sync.Mutex
+	repairQueueState     repairQueueState
+	repairQueueError     string
+	repairQueuePath      string
 	now                  func() time.Time
 	lifecycleMu          sync.RWMutex
 	started              bool
@@ -81,6 +85,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		bindingRepository:    bindingRepository,
 		jobRepository:        jobRepository,
 		wake:                 make(chan struct{}, 1),
+		repairQueuePath:      filepath.Join(options.Directory, "repair_queue.json"),
 		now:                  func() time.Time { return time.Now().UTC() },
 		handler:              options.Handler,
 		jobs:                 make(map[string]Job),
@@ -98,6 +103,9 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 
+	if err := s.loadRepairQueue(); err != nil {
+		return fmt.Errorf("load repair queue: %w", err)
+	}
 	bindings, err := s.bindingRepository.LoadAll()
 	if err != nil {
 		return fmt.Errorf("load arr bindings: %w", err)

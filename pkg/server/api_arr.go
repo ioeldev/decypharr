@@ -9,6 +9,7 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
 )
@@ -206,4 +207,33 @@ func (s *Server) handleAcknowledgeArrReacquireJob(w http.ResponseWriter, r *http
 		return
 	}
 	utils.JSONResponse(w, job, http.StatusOK)
+}
+
+func (s *Server) handleRepairQueueStatus(w http.ResponseWriter, r *http.Request) {
+	service := s.manager.ArrService()
+	if service == nil {
+		s.sendJSONError(w, "Arr reacquisition service is not available", http.StatusServiceUnavailable)
+		return
+	}
+	utils.JSONResponse(w, service.RepairQueueStatus(), http.StatusOK)
+}
+
+func (s *Server) handlePauseRepairQueue(w http.ResponseWriter, r *http.Request) {
+	service := s.manager.ArrService()
+	if service == nil {
+		s.sendJSONError(w, "Arr reacquisition service is not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Paused *bool `json:"paused"`
+	}
+	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil || req.Paused == nil {
+		http.Error(w, "paused must be a boolean", http.StatusBadRequest)
+		return
+	}
+	if _, err := config.Update(func(c *config.Config) error { c.Repair.QueuePaused = *req.Paused; return nil }); err != nil {
+		http.Error(w, "Could not save queue state", http.StatusInternalServerError)
+		return
+	}
+	utils.JSONResponse(w, service.RepairQueueStatus(), http.StatusOK)
 }

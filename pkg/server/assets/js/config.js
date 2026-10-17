@@ -248,6 +248,10 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        for (const [key, fallback] of Object.entries({queue_interval:'10s',queue_batch_size:50,queue_batch_pause:'5m',queue_max_active:10})) {
+            if ($('repair.'+key)) $('repair.'+key).value = repair[key] || fallback;
+        }
+        if ($('repair.queue_paused')) $('repair.queue_paused').checked = !!repair.queue_paused;
         if ($('repair.library_audit')) $('repair.library_audit').checked = !!repair.library_audit;
         if ($('repair.verify_content')) $('repair.verify_content').checked = !!repair.verify_content;
     }
@@ -271,6 +275,11 @@ class ConfigManager {
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
             library_audit: $('repair.library_audit')?.checked || false,
+            queue_interval: $('repair.queue_interval')?.value.trim() || '10s',
+            queue_batch_size: parseInt($('repair.queue_batch_size')?.value,10) || 50,
+            queue_batch_pause: $('repair.queue_batch_pause')?.value.trim() || '5m',
+            queue_max_active: parseInt($('repair.queue_max_active')?.value,10) || 10,
+            queue_paused: $('repair.queue_paused')?.checked || false,
             verify_content: $('repair.verify_content')?.checked || false,
             arrs,
         };

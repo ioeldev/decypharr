@@ -325,6 +325,10 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			invalid = true
 			return fmt.Errorf("invalid request body: %w", err)
 		}
+		if _, err := next.Repair.QueuePolicy(); err != nil {
+			invalid = true
+			return err
+		}
 		next.MigrateVirtualFolders()
 		if err := next.ValidateVirtualFolders(); err != nil {
 			invalid = true
@@ -445,6 +449,10 @@ func (s *Server) handleUpdateRepairConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if _, err := req.QueuePolicy(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if req.Enabled {
 		if strings.TrimSpace(req.Schedule) == "" {
 			http.Error(w, "Schedule is required when repair is enabled", http.StatusBadRequest)

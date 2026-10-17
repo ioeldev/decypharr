@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 
 	"github.com/google/uuid"
@@ -74,23 +75,6 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 		}
 	}
 
-	// A library orphan has no download group in the index. Avoid independent
-	// pack grabs for several broken episodes of the same season. Re-audit other
-	// files after the first recovery completes (including EpisodeSearch fallback).
-	if binding.Confidence == ConfidenceLibraryFile && request.Strategy == StrategySeasonPackFirst {
-		for _, id := range s.activeReacquisitions {
-			active := s.jobs[id]
-			if active.ArrName != binding.ArrName || active.Strategy != StrategySeasonPackFirst {
-				continue
-			}
-			for _, other := range active.Bindings {
-				if other.SeriesID == binding.SeriesID && other.SeasonNumber == binding.SeasonNumber && other.ArrInstanceFingerprint == binding.ArrInstanceFingerprint {
-					s.jobsMu.Unlock()
-					return nil, fmt.Errorf("season already has an active library recovery; retry after it completes")
-				}
-			}
-		}
-	}
 	var bindings []Binding
 	if binding.DownloadID != "" {
 		bindings = s.index.ByDownloadID(binding.ArrName, binding.DownloadID)
@@ -116,7 +100,11 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	if err := s.jobRepository.Save(job); err != nil {
+	save := s.jobRepository.Save
+	if job.Cause == CauseRepair {
+		save = s.jobRepository.SaveDurable
+	}
+	if err := save(job); err != nil {
 		s.jobsMu.Unlock()
 		return nil, err
 	}
@@ -232,10 +220,14 @@ func (s *Service) loadJobs(jobs []Job) error {
 func (s *Service) run(ctx context.Context) {
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
+	dispatchTicker := time.NewTicker(time.Second)
+	defer dispatchTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-dispatchTicker.C:
+			s.signal()
 		case <-ticker.C:
 			s.reconcileImportedJobs(ctx)
 			s.maintainJobs()
@@ -249,6 +241,34 @@ func (s *Service) run(ctx context.Context) {
 				job, ok := s.nextJob()
 				if !ok {
 					break
+				}
+				if err := s.reserveRepairDispatch(job); err != nil {
+					break
+				}
+				checkCtx, cancel := context.WithTimeout(ctx, executionTimeout)
+				covered, checkErr := s.completeQueuedLibraryJob(checkCtx, job)
+				cancel()
+				if ctx.Err() != nil {
+					return
+				}
+				if checkErr != nil {
+					status := StatusQueued
+					if errors.Is(checkErr, ErrBindingUnsafe) {
+						status = StatusFailed
+					}
+					_, updateErr := s.updateJobDurable(job.ID, status, func(job *Job) {
+						job.LastError = checkErr.Error()
+						if status == StatusQueued {
+							job.RetryAt = s.now().Add(retryMaxDelay)
+						}
+					})
+					if updateErr != nil {
+						break
+					}
+					continue
+				}
+				if covered {
+					continue
 				}
 				if !s.runJob(ctx, handler, job) {
 					break
@@ -333,13 +353,39 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 }
 
 func (s *Service) nextJob() (Job, bool) {
+	policy, policyErr := config.Get().Repair.QueuePolicy()
+	s.repairQueueMu.Lock()
+	nextAllowed := s.repairQueueState.NextAllowedAt
+	s.repairQueueMu.Unlock()
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
+	inFlight := 0
+	for _, job := range s.jobs {
+		if job.Cause == CauseRepair && !job.Status.Terminal() && !(job.Status == StatusQueued && job.StartedAt.IsZero()) {
+			inFlight++
+		}
+	}
+	activeSeasons := make(map[string]bool)
+	for _, job := range s.jobs {
+		if job.Cause == CauseRepair && !job.Status.Terminal() && !(job.Status == StatusQueued && job.StartedAt.IsZero()) {
+			for _, binding := range job.Bindings {
+				if key := repairSeasonKey(binding); key != "" {
+					activeSeasons[key] = true
+				}
+			}
+		}
+	}
 	var next Job
 	found := false
 	for _, id := range s.activeReacquisitions {
 		job, ok := s.jobs[id]
 		if !ok || !job.Status.dispatchable() || job.RetryAt.After(s.now()) {
+			continue
+		}
+		if job.Cause == CauseRepair && job.StartedAt.IsZero() && (policyErr != nil || policy.Paused || inFlight >= policy.MaxActive || s.now().Before(nextAllowed)) {
+			continue
+		}
+		if job.Cause == CauseRepair && job.StartedAt.IsZero() && len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile && activeSeasons[repairSeasonKey(job.Bindings[0])] {
 			continue
 		}
 		if !found || job.UpdatedAt.Before(next.UpdatedAt) {

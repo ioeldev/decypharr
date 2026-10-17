@@ -84,9 +84,10 @@ With auto-repair enabled, or when **Fix broken** is selected:
    using the exact file ID and path. Sonarr uses replacement **season pack first**,
    then **EpisodeSearch** when no eligible pack exists. Radarr searches the owning
    movie. Files without an indexed torrent use verified Arr-library recovery.
-   Only one unindexed recovery per Sonarr season can be active at a time; other
-   affected files remain broken for a later audit rather than launching competing
-   season-pack grabs.
+   Unindexed episodes of the same Sonarr season remain queued and dispatch one
+   at a time. Before dispatch, a queued orphan is checked against the Arr file
+   identities; a replacement imported by an earlier pack recovery satisfies it
+   without another delete/search.
 
 A successful sample establishes only that the beginning is readable now. It can
 come from cache and does not validate the complete movie, decoding, seeking, or
@@ -107,6 +108,51 @@ Content-Type: application/json
 }
 ```
 
+## Repair dispatch queue
+
+**Fix broken** and auto-repair enqueue durable Arr recovery jobs. Completing the
+health-check run means recovery has been requested; it does not mean every media
+file has been replaced. Track actual imports in **Arr Reacquisition**.
+
+New automatic repair jobs share a global dispatch policy across Sonarr and Radarr:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `repair.queue_interval` | `10s` | Minimum time between new repair dispatch slots. |
+| `repair.queue_batch_size` | `50` | Dispatch slots per batch. |
+| `repair.queue_batch_pause` | `5m` | Minimum cooldown after each batch, measured from its last dispatch. `0s` disables the extra cooldown. |
+| `repair.queue_max_active` | `10` | Maximum started, nonterminal repair jobs, including jobs waiting for grab/download/import or needing attention. |
+| `repair.queue_paused` | `false` | Hold new repair jobs in the queue. |
+
+The existing worker runs one Arr operation at a time. Once a job has requested a
+replacement, it continues to occupy an in-flight slot until it completes, fails,
+or is cancelled. Jobs waiting for dispatch do not expire as pending imports.
+Backlogs are kept in the job database and continue automatically when a slot is
+available. A queued orphan already covered by an earlier import can consume a
+dispatch slot for verification, but causes no additional search.
+
+Pause/resume is available in **Arr Reacquisition**, alongside queued/in-flight
+counts and the next dispatch time. It holds new repair dispatches without stopping
+the current audit, existing downloads/imports, or reconciliation of operations
+already started. Explicit manual reacquisitions and stream-triggered recoveries
+are outside this automatic repair throttle. Provider reinsertion attempts and
+read-only checks made while producing jobs are also outside the dispatch limit.
+The limit applies to jobs, not individual HTTP requests or indexers contacted.
+
+Queue settings are editable in Configuration. Empty duration fields and zero
+numeric fields use the defaults. Durations use Go duration syntax, such as `10s`
+or `5m`; the interval must be at least `1ms`, the batch pause may be zero, and both
+are limited to 24 hours. Negative counts are rejected.
+
+The batch counter and next slot are saved atomically in `db/repair_queue.json`
+before a new job can mutate an Arr. A restart or removal of terminal job history
+does not reset the cooldown. A failure to persist a reservation blocks dispatch
+and is shown in the queue status. Preserve the job database and this state file
+when backing up the application.
+
+The authenticated queue API is `GET /api/arr/reacquire/queue`. Pause or resume with
+`POST /api/arr/reacquire/queue`, body `{"paused": true}` or `{"paused": false}`.
+
 ## Configuration
 
 ```json
@@ -121,6 +167,11 @@ Content-Type: application/json
     "arrs": [],
     "auto_repair": true,
     "library_audit": false,
+    "queue_interval": "10s",
+    "queue_batch_size": 50,
+    "queue_batch_pause": "5m",
+    "queue_max_active": 10,
+    "queue_paused": false,
     "verify_content": false,
     "notify_on_complete": false,
     "nntp_connection_percent": 20,
