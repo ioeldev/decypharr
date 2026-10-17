@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/sirrobot01/decypharr/pkg/arr"
 )
@@ -16,6 +17,32 @@ func (handler *arrHandler) grabBestRelease(
 	bindings []Binding,
 	progress JobProgress,
 ) (Status, error) {
+	return handler.grabReplacementRelease(ctx, instance, job, bindings, progress, false)
+}
+
+var errNoSeasonPack = errors.New("no eligible replacement season pack")
+
+// seasonPackFirst never fails grab history: Sonarr can automatically search
+// when history is failed, racing the explicit pack selection. The original
+// torrent is excluded from pack candidates by its download ID/infohash instead.
+func (handler *arrHandler) seasonPackFirst(ctx context.Context, instance arr.Arr, job *Job, bindings []Binding, progress JobProgress) (Status, error) {
+	// A fallback dispatched before a crash must be reconciled, not replaced by
+	// a newly visible pack on restart.
+	if _, found := mutationOfKind(*job, MutationEpisodeSearch); found {
+		return handler.searchBindings(ctx, instance, job, bindings, progress)
+	}
+	status, err := handler.grabReplacementRelease(ctx, instance, job, bindings, progress, true)
+	if !errors.Is(err, errNoSeasonPack) {
+		return status, err
+	}
+	episodeIDs, _, _ := sonarrTargets(bindings)
+	if len(episodeIDs) == 0 {
+		return "", fmt.Errorf("season-pack fallback requires episode IDs")
+	}
+	return handler.searchBindings(ctx, instance, job, bindings, progress)
+}
+
+func (handler *arrHandler) grabReplacementRelease(ctx context.Context, instance arr.Arr, job *Job, bindings []Binding, progress JobProgress, seasonPackOnly bool) (Status, error) {
 	if err := progress.Update(StatusSearching, nil); err != nil {
 		return "", err
 	}
@@ -39,14 +66,14 @@ func (handler *arrHandler) grabBestRelease(
 				return "", err
 			}
 		}
-		release, err := handler.findPersistedRelease(ctx, instance, bindings, mutation)
+		release, err := handler.findPersistedReplacement(ctx, instance, job, bindings, mutation, seasonPackOnly)
 		if err != nil {
 			return "", err
 		}
 		return handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
 	}
 
-	releases, err := handler.searchReplacementReleases(ctx, instance, bindings)
+	releases, err := handler.replacementReleases(ctx, instance, job, bindings, seasonPackOnly)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +91,43 @@ func (handler *arrHandler) grabBestRelease(
 		}
 		return handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
 	}
+	if seasonPackOnly {
+		return "", errNoSeasonPack
+	}
 	return "", fmt.Errorf("arr returned no downloadable replacement release with reconcilable identity")
+}
+
+func (handler *arrHandler) replacementReleases(ctx context.Context, instance arr.Arr, job *Job, bindings []Binding, seasonPackOnly bool) ([]arr.Release, error) {
+	if !seasonPackOnly {
+		return handler.searchReplacementReleases(ctx, instance, bindings)
+	}
+	_, seriesID, season := sonarrTargets(bindings)
+	// A download spanning seasons cannot be replaced by one season pack.
+	if !singleSonarrSeason(bindings, seriesID, season) {
+		return nil, nil
+	}
+	releases, err := handler.arrs.SeasonReleases(ctx, instance.Name, seriesID, season)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]arr.Release, 0, len(releases))
+	for _, release := range releases {
+		if !release.FullSeason || (release.MappedSeriesID != nil && *release.MappedSeriesID != seriesID) {
+			continue
+		}
+		mappedSeason := release.SeasonNumber
+		if release.MappedSeasonNumber != nil {
+			mappedSeason = release.MappedSeasonNumber
+		}
+		if mappedSeason == nil || *mappedSeason != season || len(release.SeasonNumbers) > 1 {
+			continue
+		}
+		if release.InfoHash != "" && (strings.EqualFold(release.InfoHash, job.DownloadID) || strings.EqualFold(release.InfoHash, job.EntryID)) {
+			continue
+		}
+		filtered = append(filtered, release)
+	}
+	return filtered, nil
 }
 
 func (handler *arrHandler) searchReplacementReleases(ctx context.Context, instance arr.Arr, bindings []Binding) ([]arr.Release, error) {
@@ -127,13 +190,15 @@ func releaseMutation(bindings []Binding, release arr.Release) (Mutation, error) 
 	return mutation, nil
 }
 
-func (handler *arrHandler) findPersistedRelease(
+func (handler *arrHandler) findPersistedReplacement(
 	ctx context.Context,
 	instance arr.Arr,
+	job *Job,
 	bindings []Binding,
 	mutation Mutation,
+	seasonPackOnly bool,
 ) (arr.Release, error) {
-	releases, err := handler.searchReplacementReleases(ctx, instance, bindings)
+	releases, err := handler.replacementReleases(ctx, instance, job, bindings, seasonPackOnly)
 	if err != nil {
 		return arr.Release{}, err
 	}

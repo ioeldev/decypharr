@@ -46,6 +46,14 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 	if err := validateSearchBindings(instance, bindings); err != nil {
 		return err
 	}
+	if job.Strategy == StrategySeasonPackFirst {
+		if instance.Type != arr.Sonarr {
+			return fmt.Errorf("season-pack-first reacquisition requires Sonarr")
+		}
+		if episodeIDs, _, _ := sonarrTargets(bindings); len(episodeIDs) == 0 {
+			return fmt.Errorf("season-pack-first reacquisition requires episode IDs")
+		}
+	}
 	downloadConfig, err := handler.arrs.DownloadClientConfig(ctx, instance.Name)
 	if err != nil {
 		return err
@@ -86,6 +94,8 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 		if err = handler.executeExactDownloadFailure(ctx, instance, &job, failurePlan, progress); err == nil {
 			waitingStatus, err = handler.grabBestRelease(ctx, instance, &job, bindings, progress)
 		}
+	case StrategySeasonPackFirst:
+		waitingStatus, err = handler.seasonPackFirst(ctx, instance, &job, bindings, progress)
 	default:
 		return fmt.Errorf("unsupported reacquire strategy %q", job.Strategy)
 	}
