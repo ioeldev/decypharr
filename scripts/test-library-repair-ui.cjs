@@ -33,6 +33,30 @@ for(const asset of ['js','build/js']) {
   assert.match(html,/\/base\/api\/repair\/library\/media\?arr=shows&amp;media=9/);
   assert.equal(manager.visible.length,1);
  });
+ test(`${asset}: legacy audits recover seasons without mixing seasons or inventing season zero`,()=>{
+  const {manager,elements}=harness(asset);
+  const base={arr_name:'shows',arr_fingerprint:'a',arr_kind:'sonarr',media_id:9};
+  const incident=(id,path,extra={})=>({entry_name:`incident-${id}`,status:'broken',library_file:{...base,episode_id:id,arr_file_id:id,source_path:path,...extra}});
+  const first=incident(11,'/TV/Example/Season 1/file.mkv');
+  const second=incident(12,'/TV/Example/Season 2/file.mkv');
+  const flat=incident(13,'/TV/Example/Example.S03E01.mkv');
+  const unknown=incident(14,'/TV/Example/file.mkv');
+  const special=incident(15,'/TV/Example/Specials/file.mkv');
+  const bound=incident(16,'/TV/Example/file2.mkv');
+  const binding={arrName:'shows',arrInstanceFingerprint:'a',arrType:'sonarr',seriesId:9,arrFileId:16,episodeIds:[16],seasonNumber:4};
+  manager.data={incidents:[first,second,flat,unknown,special,bound],jobs:[{id:'job',status:'failed',bindings:[binding]}]};
+  assert.deepEqual(Array.from(manager.rows(),r=>r.season),[1,2,3,null,0,4]);
+  manager.render();
+  const html=elements.get('libraryRows').innerHTML;
+  for(const season of [0,1,2,3,4,'unknown'])assert.match(html,new RegExp(`Example · Season ${season} · 1 findings`));
+  assert.match(elements.get('libraryPageInfo').textContent,/6 media\/season groups/);
+  assert.equal(first.library_file.season_number,undefined);
+  // Explicit zero is a real season; unrelated bindings must not supply a season.
+  assert.equal(manager.seasonNumber({...bound.library_file,season_number:0},manager.data.jobs[0]),0);
+  assert.equal(manager.seasonNumber(unknown.library_file,manager.data.jobs[0]),null);
+  assert.equal(manager.seasonNumber({...unknown.library_file,source_path:'/TV/Example/episode-S00E02.mkv'},null),0);
+  assert.equal(manager.seriesLabel({f:flat.library_file,label:'fallback'}),'Example');
+ });
  test(`${asset}: a hanging response body is aborted and polling recovers`,async()=>{
   const {manager,context,elements,timers}=harness(asset);
   context.fetch=async(url,{signal})=>({ok:true,json:()=>new Promise((resolve,reject)=>{if(signal.aborted)reject(new Error('timeout'));else signal.addEventListener('abort',()=>reject(new Error('timeout')));})});

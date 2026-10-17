@@ -65,6 +65,29 @@ class LibraryRepairManager {
         }
         return rows;
     }
+    seasonNumber(f,j) {
+        const valid=n=>Number.isInteger(n)&&n>=0;
+        if(valid(f.season_number))return f.season_number;
+        // Older audits did not persist seasons. Use only bindings for this file/episode.
+        const seasons=new Set((j?.bindings||[]).filter(b=>this.matches(f,b))
+            .map(b=>b.seasonNumber).filter(valid));
+        if(seasons.size===1)return [...seasons][0];
+        // Display-only fallback: never use a filename to authorize recovery actions.
+        const parts=(f.source_path||'').split('/');
+        const folder=parts.at(-2)||'';
+        const directory=folder.match(/^(?:season|saison)\s+(\d+)$/i);
+        if(directory)return Number(directory[1]);
+        const filename=(parts.at(-1)||'').match(/(?:^|[ ._-])S(\d+)E\d+(?=$|[ ._-])/i);
+        if(filename)return Number(filename[1]);
+        if(/^specials$/i.test(folder))return 0;
+        return null;
+    }
+    seriesLabel(row) {
+        const parts=(row.f.source_path||'').split('/').filter(Boolean);
+        const parent=parts.at(-2)||'';
+        const seasonFolder=/^(?:(?:season|saison)\s+\d+|specials)$/i.test(parent);
+        return (seasonFolder?parts.at(-3):parent)||row.label;
+    }
     row(h,j,f) {
         const verified=h?.status==='healthy' && h.last_failed_at && (!j || j.status==='ready' || j.status==='cancelled');
         let category='pending';
@@ -72,7 +95,7 @@ class LibraryRepairManager {
         else if(j && ['needs_attention','failed'].includes(j.status))category='attention';
         else if(j && ['resolving','invalidating','blocklisting','searching','waiting_for_grab','waiting_for_download','waiting_for_import','ready'].includes(j.status))category='active';
         const label=h?.display_name || f.source_path?.split('/').slice(-2).join(' / ') || `Media ${f.media_id}`;
-        return {h,j,f,category,label,verified};
+        return {h,j,f,category,label,verified,season:this.seasonNumber(f,j)};
     }
     recoveryLabel(j) {
         if(!j)return 'Not queued';
@@ -84,7 +107,7 @@ class LibraryRepairManager {
         // Group seasons but retain per-file diagnostics and actions.
         const groups=new Map();
         for(const row of rows) {
-            const key=JSON.stringify([row.f.arr_name,row.f.arr_fingerprint,row.f.arr_kind,row.f.media_id,row.f.arr_kind==='sonarr'?row.f.season_number:0]);
+            const key=JSON.stringify([row.f.arr_name,row.f.arr_fingerprint,row.f.arr_kind,row.f.media_id,row.f.arr_kind==='sonarr'?row.season:0]);
             if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);
         }
         const entries=[...groups.values()];const pages=Math.max(1,Math.ceil(entries.length/this.pageSize));this.page=Math.min(this.page,pages);
@@ -93,9 +116,9 @@ class LibraryRepairManager {
             let prefix='';
             if(group[0].f.arr_kind==='sonarr') {
                 const f=group[0].f;
-                const key=JSON.stringify([f.arr_name,f.arr_fingerprint,f.media_id,f.season_number]);
+                const key=JSON.stringify([f.arr_name,f.arr_fingerprint,f.media_id,group[0].season]);
                 const open=this.expanded?.has(key);
-                prefix=`<tr class="bg-base-200"><td colspan="6"><button class="btn btn-sm btn-ghost" data-group="${this.esc(key)}" aria-expanded="${!!open}">${open?'▾':'▸'} ${this.esc(f.source_path?.split('/').slice(-3,-2).join('')||group[0].label)} · Season ${this.esc(f.season_number??0)} · ${group.length} findings</button></td></tr>`;
+                prefix=`<tr class="bg-base-200"><td colspan="6"><button class="btn btn-sm btn-ghost" data-group="${this.esc(key)}" aria-expanded="${!!open}">${open?'▾':'▸'} ${this.esc(this.seriesLabel(group[0]))} · Season ${this.esc(group[0].season??'unknown')} · ${group.length} findings</button></td></tr>`;
                 if(!open)return prefix;
             }
             return prefix+group.map(row=>{
