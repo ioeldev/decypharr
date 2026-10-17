@@ -2,334 +2,237 @@ package arr
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"net/http"
-	"strconv"
-	"strings"
+	"os"
+	"slices"
+
+	"golang.org/x/sync/errgroup"
 )
 
-type episode struct {
-	Id            int `json:"id"`
-	EpisodeFileID int `json:"episodeFileId"`
+// contentBatchSize bounds one bulk delete or search, which Arr applies in a
+// single database transaction.
+const contentBatchSize = 50
+
+type Content struct {
+	Title string        `json:"title"`
+	Id    int           `json:"id"`
+	Files []ContentFile `json:"files"`
 }
 
-type sonarrSearch struct {
+type ContentFile struct {
 	Name         string `json:"name"`
+	Path         string `json:"path"`
+	Id           int    `json:"id"`
+	EpisodeId    int    `json:"showId"`
+	FileId       int    `json:"fileId"`
+	TargetPath   string `json:"targetPath"`
+	EntryName    string `json:"entryName,omitempty"`
+	IsSymlink    bool   `json:"isSymlink"`
+	IsBroken     bool   `json:"isBroken"`
 	SeasonNumber int    `json:"seasonNumber"`
-	SeriesId     int    `json:"seriesId"`
+	Processed    bool   `json:"processed"`
+	Size         int64  `json:"size"`
 }
 
-type radarrSearch struct {
-	Name     string `json:"name"`
-	MovieIds []int  `json:"movieIds"`
+// Delete removes the file from disk. Sonarr's bulk delete regularly fails to,
+// which leaves a broken symlink behind.
+func (f *ContentFile) Delete() {
+	_ = os.Remove(f.Path)
 }
 
-func (a *Arr) GetMedia(mediaId string) ([]Content, error) {
-	// Get series
-	if a.Type == Radarr {
-		return GetMovies(a, mediaId)
-	}
-	// This is likely Sonarr
-	resp, err := a.Request(http.MethodGet, fmt.Sprintf("api/v3/series?tvdbId=%s", mediaId), nil)
+type Movie struct {
+	Title         string `json:"title"`
+	OriginalTitle string `json:"originalTitle"`
+	Path          string `json:"path"`
+	MovieFile     struct {
+		MovieId      int    `json:"movieId"`
+		RelativePath string `json:"relativePath"`
+		Path         string `json:"path"`
+		Id           int    `json:"id"`
+		Size         int64  `json:"size"`
+	} `json:"movieFile"`
+	Id int `json:"id"`
+}
+
+// Media enumerates the library as repair sees it: one Content per series or
+// movie, with the files it has imported. An empty mediaID returns everything.
+func (s *Service) Media(ctx context.Context, name, mediaID string) ([]Content, error) {
+	instance, err := s.instance(name)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		// This is likely Radarr
-		return GetMovies(a, mediaId)
+	if instance.Type == Radarr {
+		return s.movies(ctx, instance, mediaID)
 	}
-	a.Type = Sonarr
 
-	type series struct {
+	var series []struct {
 		Title string `json:"title"`
 		Id    int    `json:"id"`
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get series: %s", resp.Status)
+	resp, err := s.get(ctx, instance, fmt.Sprintf("api/v3/series?tvdbId=%s", mediaID), &series)
+	if err != nil {
+		return nil, err
 	}
-	var data []series
-	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("failed to decode series: %v", err)
+	if resp.StatusCode == http.StatusNotFound {
+		return s.movies(ctx, instance, mediaID)
 	}
-	// Get series files
-	contents := make([]Content, 0)
-	for _, d := range data {
-		resp, err = a.Request(http.MethodGet, fmt.Sprintf("api/v3/episodefile?seriesId=%d", d.Id), nil)
-		if err != nil {
-			continue
-		}
-		var ct Content
-		var seriesFiles []seriesFile
-		episodeFileIDMap := make(map[int]int)
-		func() {
-			defer resp.Body.Close()
-			if err = json.NewDecoder(resp.Body).Decode(&seriesFiles); err != nil {
-				return
-			}
-			ct = Content{
-				Title: d.Title,
-				Id:    d.Id,
-			}
-		}()
-		resp, err = a.Request(http.MethodGet, fmt.Sprintf("api/v3/episode?seriesId=%d", d.Id), nil)
-		if err != nil {
-			continue
-		}
-		func() {
-			defer resp.Body.Close()
-			var episodes []episode
-			if err = json.NewDecoder(resp.Body).Decode(&episodes); err != nil {
-				return
-			}
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return nil, fmt.Errorf("list series: %w", err)
+	}
 
-			for _, e := range episodes {
-				episodeFileIDMap[e.EpisodeFileID] = e.Id
+	contents := make([]Content, 0, len(series))
+	for _, item := range series {
+		if err := ctx.Err(); err != nil {
+			return contents, err
+		}
+		files, err := s.sonarrSeriesFiles(ctx, instance, item.Id)
+		if err != nil {
+			continue
+		}
+		content := Content{Title: item.Title, Id: item.Id, Files: make([]ContentFile, 0, len(files))}
+		for _, file := range files {
+			episodeID := 0
+			if len(file.EpisodeIDs) > 0 {
+				episodeID = file.EpisodeIDs[0]
 			}
-		}()
-		files := make([]ContentFile, 0)
-		for _, file := range seriesFiles {
-			eId, ok := episodeFileIDMap[file.Id]
-			if !ok {
-				eId = 0
-			}
-			if file.Id == 0 || file.Path == "" {
-				// Skip files without path
-				continue
-			}
-			files = append(files, ContentFile{
-				FileId:       file.Id,
+			content.Files = append(content.Files, ContentFile{
+				FileId:       file.ArrFileID,
 				Path:         file.Path,
-				Id:           d.Id,
-				EpisodeId:    eId,
+				Id:           item.Id,
+				EpisodeId:    episodeID,
 				SeasonNumber: file.SeasonNumber,
 				Size:         file.Size,
 			})
 		}
-		if len(files) == 0 {
-			// Skip series without files
+		if len(content.Files) == 0 {
 			continue
 		}
-		ct.Files = files
-		contents = append(contents, ct)
+		contents = append(contents, content)
 	}
 	return contents, nil
 }
 
-func GetMovies(a *Arr, tvId string) ([]Content, error) {
-	resp, err := a.Request(http.MethodGet, fmt.Sprintf("api/v3/movie?tmdbId=%s", tvId), nil)
+func (s *Service) movies(ctx context.Context, instance Arr, mediaID string) ([]Content, error) {
+	var movies []Movie
+	resp, err := s.get(ctx, instance, fmt.Sprintf("api/v3/movie?tmdbId=%s", mediaID), &movies)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusNotFound {
-		// This is likely Lidarr or Readarr
-		return nil, fmt.Errorf("failed to get movies: %s", resp.Status)
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return nil, fmt.Errorf("list movies: %w", err)
 	}
-	a.Type = Radarr
-	defer resp.Body.Close()
-	var movies []Movie
-	if err = json.NewDecoder(resp.Body).Decode(&movies); err != nil {
-		return nil, fmt.Errorf("failed to decode movies: %v", err)
-	}
-	contents := make([]Content, 0)
+
+	contents := make([]Content, 0, len(movies))
 	for _, movie := range movies {
 		if movie.MovieFile.Id == 0 || movie.MovieFile.Path == "" {
-			// Skip movies without files
 			continue
 		}
-		ct := Content{
+		contents = append(contents, Content{
 			Title: movie.Title,
 			Id:    movie.Id,
-		}
-		files := make([]ContentFile, 0)
-
-		files = append(files, ContentFile{
-			FileId: movie.MovieFile.Id,
-			Id:     movie.Id,
-			Path:   movie.MovieFile.Path,
-			Size:   movie.MovieFile.Size,
+			Files: []ContentFile{{
+				FileId: movie.MovieFile.Id,
+				Id:     movie.Id,
+				Path:   movie.MovieFile.Path,
+				Size:   movie.MovieFile.Size,
+			}},
 		})
-		ct.Files = files
-		contents = append(contents, ct)
 	}
 	return contents, nil
 }
 
-// searchSonarr searches for missing files in the arr
-// map ids are series id and season number
-func (a *Arr) searchSonarr(files []ContentFile) error {
-	ids := make(map[string]any)
-	for _, f := range files {
-		// Join series id and season number
-		id := fmt.Sprintf("%d-%d", f.Id, f.SeasonNumber)
-		ids[id] = nil
-	}
-
-	g, ctx := errgroup.WithContext(context.Background())
-
-	// Limit concurrent goroutines
-	g.SetLimit(10)
-	for id := range ids {
-		id := id
-		g.Go(func() error {
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			parts := strings.Split(id, "-")
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid id: %s", id)
-			}
-			seriesId, err := strconv.Atoi(parts[0])
-			if err != nil {
-				return err
-			}
-			seasonNumber, err := strconv.Atoi(parts[1])
-			if err != nil {
-				return err
-			}
-			payload := sonarrSearch{
-				Name:         "SeasonSearch",
-				SeasonNumber: seasonNumber,
-				SeriesId:     seriesId,
-			}
-			resp, err := a.Request(http.MethodPost, "api/v3/command", payload)
-			if err != nil {
-				return fmt.Errorf("failed to automatic search: %v", err)
-			}
-			if resp.StatusCode >= 300 || resp.StatusCode < 200 {
-				return fmt.Errorf("failed to automatic search. Status Code: %s", resp.Status)
-			}
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
+// SearchMissing asks the Arr to look for replacements for the given files.
+func (s *Service) SearchMissing(ctx context.Context, name string, files []ContentFile) error {
+	instance, err := s.instance(name)
+	if err != nil || len(files) == 0 {
 		return err
 	}
+	for batch := range slices.Chunk(files, contentBatchSize) {
+		switch instance.Type {
+		case Sonarr:
+			err = s.searchSonarrSeasons(ctx, instance, batch)
+		case Radarr:
+			err = s.searchRadarrMovies(ctx, instance, batch)
+		default:
+			return fmt.Errorf("%w: %s", ErrUnsupportedType, instance.Type)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func (a *Arr) searchRadarr(files []ContentFile) error {
-	ids := make([]int, 0)
-	for _, f := range files {
-		ids = append(ids, f.Id)
+func (s *Service) searchSonarrSeasons(ctx context.Context, instance Arr, files []ContentFile) error {
+	seasons := make(map[[2]int]struct{}, len(files))
+	for _, file := range files {
+		seasons[[2]int{file.Id, file.SeasonNumber}] = struct{}{}
 	}
-	payload := radarrSearch{
-		Name:     "MoviesSearch",
-		MovieIds: ids,
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	// Each command writes to Sonarr's command table, and its single SQLite
+	// writer turns parallel posts into "database is locked" failures.
+	group.SetLimit(1)
+	for season := range seasons {
+		group.Go(func() error {
+			_, err := s.command(groupCtx, instance, struct {
+				Name         string `json:"name"`
+				SeriesId     int    `json:"seriesId"`
+				SeasonNumber int    `json:"seasonNumber"`
+			}{Name: "SeasonSearch", SeriesId: season[0], SeasonNumber: season[1]})
+			return err
+		})
 	}
-	resp, err := a.Request(http.MethodPost, "api/v3/command", payload)
+	return group.Wait()
+}
+
+func (s *Service) searchRadarrMovies(ctx context.Context, instance Arr, files []ContentFile) error {
+	ids := make([]int, 0, len(files))
+	for _, file := range files {
+		ids = append(ids, file.Id)
+	}
+	_, err := s.command(ctx, instance, struct {
+		Name     string `json:"name"`
+		MovieIds []int  `json:"movieIds"`
+	}{Name: "MoviesSearch", MovieIds: ids})
+	return err
+}
+
+// DeleteFiles removes imported files in bulk, then removes whatever the Arr
+// left on disk.
+func (s *Service) DeleteFiles(ctx context.Context, name string, files []ContentFile) error {
+	instance, err := s.instance(name)
+	if err != nil || len(files) == 0 {
+		return err
+	}
+	resource, err := fileResource(instance.Type)
 	if err != nil {
-		return fmt.Errorf("failed to automatic search: %v", err)
+		return err
 	}
-	if statusOk := strconv.Itoa(resp.StatusCode)[0] == '2'; !statusOk {
-		return fmt.Errorf("failed to automatic search. Status Code: %s", resp.Status)
-	}
-	return nil
-}
+	field := map[Type]string{Sonarr: "episodeFileIds", Radarr: "movieFileIds"}[instance.Type]
 
-func (a *Arr) SearchMissing(files []ContentFile) error {
-	if len(files) == 0 {
-		return nil
-	}
-	return a.batchSearchMissing(files)
-}
-
-func (a *Arr) batchSearchMissing(files []ContentFile) error {
-	if len(files) == 0 {
-		return nil
-	}
-	BatchSize := 50
-	// Batch search for missing files
-	if len(files) > BatchSize {
-		for i := 0; i < len(files); i += BatchSize {
-			end := i + BatchSize
-			if end > len(files) {
-				end = len(files)
-			}
-			if err := a.searchMissing(files[i:end]); err != nil {
-				// continue searching the rest of the files
-				continue
+	for batch := range slices.Chunk(files, contentBatchSize) {
+		ids := make([]int, 0, len(batch))
+		for _, file := range batch {
+			// Sonarr rejects the whole batch when an ID repeats.
+			if file.FileId != 0 && !slices.Contains(ids, file.FileId) {
+				ids = append(ids, file.FileId)
 			}
 		}
-		return nil
-	}
-	return a.searchMissing(files)
-}
-
-func (a *Arr) searchMissing(files []ContentFile) error {
-	switch a.Type {
-	case Sonarr:
-		return a.searchSonarr(files)
-	case Radarr:
-		return a.searchRadarr(files)
-	default:
-		return fmt.Errorf("unknown arr type: %s", a.Type)
-	}
-}
-
-func (a *Arr) DeleteFiles(files []ContentFile) error {
-	if len(files) == 0 {
-		return nil
-	}
-	BatchSize := 50
-	// Batch delete files
-	if len(files) > BatchSize {
-		for i := 0; i < len(files); i += BatchSize {
-			end := i + BatchSize
-			if end > len(files) {
-				end = len(files)
-			}
-			if err := a.batchDeleteFiles(files[i:end]); err != nil {
-				// continue deleting the rest of the files
-				continue
-			}
+		if len(ids) == 0 {
+			continue
 		}
-		return nil
-	}
-	return a.batchDeleteFiles(files)
-}
-
-func (a *Arr) batchDeleteFiles(files []ContentFile) error {
-	ids := make([]int, 0)
-	for _, f := range files {
-		ids = append(ids, f.FileId)
-	}
-	defer func() {
-		// Delete files, or at least try
-		for _, f := range files {
-			f.Delete()
-		}
-	}()
-	var payload interface{}
-	switch a.Type {
-	case Sonarr:
-		payload = struct {
-			EpisodeFileIds []int `json:"episodeFileIds"`
-		}{
-			EpisodeFileIds: ids,
-		}
-		_, err := a.Request(http.MethodDelete, "api/v3/episodefile/bulk", payload)
+		resp, err := s.mutate(ctx, instance, http.MethodDelete, "api/v3/"+resource+"/bulk", map[string][]int{field: ids}, nil)
 		if err != nil {
-			return err
+			return fmt.Errorf("delete %s bulk: %w", resource, err)
 		}
-	case Radarr:
-		payload = struct {
-			MovieFileIds []int `json:"movieFileIds"`
-		}{
-			MovieFileIds: ids,
+		if err := expectSuccess(resp); err != nil {
+			return fmt.Errorf("delete %s bulk: %w", resource, err)
 		}
-		_, err := a.Request(http.MethodDelete, "api/v3/moviefile/bulk", payload)
-		if err != nil {
-			return err
+		for i := range batch {
+			batch[i].Delete()
 		}
-	default:
-		return fmt.Errorf("unknown arr type: %s", a.Type)
 	}
 	return nil
 }

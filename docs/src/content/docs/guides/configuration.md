@@ -1,0 +1,563 @@
+---
+title: Configuration Reference
+description: Complete config.json reference.
+---
+
+Configuration is stored in `config.json`. Most settings can be managed via the Web UI under Settings.
+
+## Server
+
+```json
+{
+  "bind_address": "0.0.0.0",
+  "port": "8282",
+  "url_base": "",
+  "app_url": "http://localhost:8282",
+  "log_level": "info"
+}
+```
+
+| Field          | Type   | Description                                      | Default       |
+|----------------|--------|--------------------------------------------------|---------------|
+| `bind_address` | string | IP to bind to                                    | `0.0.0.0`     |
+| `port`         | string | Port to listen on                                | `8282`        |
+| `url_base`     | string | Base path for reverse proxy                      | `""`          |
+| `app_url`      | string | External URL for callbacks                       | Auto-detected |
+| `log_level`    | string | Logging level (`debug`, `info`, `warn`, `error`) | `info`        |
+
+## Authentication
+
+```json
+{
+  "use_auth": true,
+  "username": "admin",
+  "password": "$2a$10$...",
+  "api_token": "..."
+}
+```
+
+Password is bcrypt-hashed. API token is auto-generated.
+
+### Token-only authentication
+
+Set `token_only` in `auth.json` to use the API token as the only credential:
+
+```json
+{
+  "api_token": "...",
+  "token_only": true
+}
+```
+
+In this mode there is no username and no password. Use these rules:
+
+- Send the token in the `Authorization` header for API requests.
+- Type the token in the password box to log in to the web interface.
+- Give the token to Sonarr or Radarr as the download client password.
+- Keep WebDAV authentication off. WebDAV accepts only a username and a
+  password. It always rejects the API token.
+
+Registration stays closed in this mode. If you lose the token, edit
+`auth.json` to set a new one.
+
+To start in this mode without the web interface, set these environment
+variables:
+
+| Variable          | Description                       |
+|-------------------|-----------------------------------|
+| `USE_AUTH`        | Set to `true` to enable auth.     |
+| `AUTH_TOKEN_ONLY` | Set to `true` for token-only auth.|
+| `API_TOKEN`       | Set the token to a known value.   |
+
+## Downloads
+
+```json
+{
+  "max_active_downloads": 5
+}
+```
+
+`max_active_downloads` is the shared active-processing limit for torrent and NZB downloads. Additional imports remain queued until an active download completes.
+
+## Debrid Providers
+
+Array of Debrid services:
+
+```json
+{
+  "debrids": [
+    {
+      "provider": "realdebrid",
+      "name": "RD Primary",
+      "api_key": "YOUR_API_KEY",
+      "download_uncached": false,
+      "rate_limit": "200/minute",
+      "workers": 50,
+      "minimum_free_slot": 0,
+      "limit": 100,
+      "torrents_refresh_interval": "5m",
+      "download_links_refresh_interval": "10m",
+      "auto_expire_links_after": "24h",
+      "proxy": "",
+      "unpack_rar": true
+    }
+  ]
+}
+```
+
+### Provider Fields
+
+| Field                             | Type   | Description                                                                    | Default                         |
+|-----------------------------------|--------|--------------------------------------------------------------------------------|---------------------------------|
+| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox`, `premiumize` | **Required**                    |
+| `name`                            | string | Display name                                                                   | Provider type                   |
+| `api_key`                         | string | API key from provider dashboard                                                | **Required**                    |
+| `download_api_keys`               | array  | Additional keys for download rotation                                          | `[api_key]`                     |
+| `download_uncached`               | bool   | Download torrents not in provider cache                                        | `false`                         |
+| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                                     | `200/minute`                    |
+| `repair_rate_limit`               | string | Separate limit for repair operations                                           | Same as `rate_limit`            |
+| `download_rate_limit`             | string | Separate limit for downloads                                                   | Same as `rate_limit`            |
+| `proxy`                           | string | HTTP(S) proxy URL                                                              | `""`                            |
+| `unpack_rar`                      | bool   | Auto-extract RAR archives                                                      | `true`                          |
+| `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                                | `0`                             |
+| `limit`                           | int    | Max torrents allowed on this provider                                          | `0` (unlimited)                 |
+| `workers`                         | int    | Concurrent API workers                                                         | Auto (CPU * 50 / num_providers) |
+| `torrents_refresh_interval`       | string | How often to refresh torrent list                                              | `5m`                            |
+| `download_links_refresh_interval` | string | How often to refresh download links                                            | `10m`                           |
+| `auto_expire_links_after`         | string | Auto-remove links after duration                                               | `24h`                           |
+| `user_agent`                      | string | Custom User-Agent header                                                       | Default                         |
+
+## Usenet
+
+```json
+{
+  "usenet": {
+    "providers": [
+      {
+        "host": "news.provider.com",
+        "port": 563,
+        "username": "user",
+        "password": "pass",
+        "backbone": "Omicron",
+        "ssl": true,
+        "max_connections": 20,
+        "priority": 1
+      }
+    ],
+    "max_connections": 15,
+    "processing_max_connections": 15,
+    "read_ahead": "16MB",
+    "body_pipeline_depth": 2,
+    "stream_backup_wait": "0",
+    "processing_timeout": "10m",
+    "availability_sample_percent": 10,
+    "import_availability_sample_percent": 1,
+    "disk_path": ""
+  }
+}
+```
+
+### Usenet Fields
+
+| Field                         | Type   | Description                     | Default                      |
+|-------------------------------|--------|---------------------------------|------------------------------|
+| `providers`                   | array  | NNTP server configurations      | `[]`                         |
+| `max_connections`             | int    | Global streaming fetch-worker limit | `15`                      |
+| `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
+| `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `body_pipeline_depth`         | int    | Ordered read-ahead `BODY` commands per connection (`1` disables pipelining, range 1-4) | `2` |
+| `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
+| `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
+| `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
+| `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
+| `disk_path`                   | string | Disk-backed rewind location; empty buffers in memory | `""` (memory) |
+
+### NNTP workload priority
+
+Connection scheduling is automatic and work-conserving. The four admission
+classes, from highest to lowest, are urgent playback demand, bounded stream
+read-ahead, full downloads/import parsing, and background repair, availability,
+or speed-test work. Lower-priority work may use every connection while no
+higher-priority request is waiting, so the policy does not reserve idle
+connections or reduce background throughput.
+
+An in-progress article is allowed to finish. Priority takes effect at the next
+article boundary, avoiding discarded data and unnecessary reconnects. Stream
+read-ahead pipelines up to `body_pipeline_depth` ordered `BODY` commands once
+enough work is queued to keep the available prefetch workers occupied; shorter
+ranges stay single-body to preserve connection parallelism. The default depth
+of 2 balances RTT savings with a short preemption window. Set it to 1 to disable
+BODY pipelining, or up to 4 for higher throughput on high-latency links. Urgent
+playback remains one article per request, and single-worker setups also behave
+as depth one. Repair checks pipeline up to 16 `STAT` commands per connection and
+return the connection after each window.
+
+Providers marked `backup` stay in a fallback tier. They are normally used only
+after primary providers fail or do not carry an article. Setting
+`stream_backup_wait` to a duration such as `250ms` additionally allows only an
+urgent playback read to use a backup after waiting that long for a primary
+slot. Leave it unset or set it to `0` to prevent busy primaries from consuming
+block-account traffic.
+
+This workload priority is separate from a provider's `priority` field. Provider
+priority controls which server is preferred; workload priority controls which
+kind of local operation receives the next available connection.
+
+### Provider Fields
+
+| Field             | Type   | Description                        | Default             |
+|-------------------|--------|------------------------------------|---------------------|
+| `host`            | string | NNTP server hostname               | **Required**        |
+| `port`            | int    | NNTP port                          | `119` (563 for SSL) |
+| `username`        | string | NNTP username                      | **Required**        |
+| `password`        | string | NNTP password                      | **Required**        |
+| `backbone`        | string | Optional shared article backbone for article-not-found failover | `""` |
+| `ssl`             | bool   | Use SSL/TLS                        | `false`             |
+| `max_connections` | int    | Max connections to this server     | `20`                |
+| `priority`        | int    | Provider priority (lower = higher) | Index + 1           |
+| `backup`          | bool   | Put provider in the fallback/block-account tier | `false`       |
+
+## Mounting
+
+Mount configuration determines how files are exposed on the filesystem.
+
+### Mount Type Selection
+
+```json
+{
+  "mount": {
+    "type": "dfs",
+    "mount_path": "/mnt/decypharr"
+  }
+}
+```
+
+| Type              | Description                            |
+|-------------------|----------------------------------------|
+| `dfs`             | Custom VFS optimized for streaming     |
+| `rclone`          | Embedded Rclone with full VFS features |
+| `external_rclone` | Connect to existing Rclone RC instance |
+| `none`            | No filesystem mounting                 |
+
+### DFS Configuration
+
+```json
+{
+  "mount": {
+    "type": "dfs",
+    "mount_path": "/mnt/decypharr",
+    "dfs": {
+      "cache_dir": "/cache/dfs",
+      "chunk_size": "10MB",
+      "disk_cache_size": "50GB",
+      "cache_expiry": "24h",
+      "cache_cleanup_interval": "1h",
+      "daemon_timeout": "30m",
+      "uid": 1000,
+      "gid": 1000,
+      "umask": "022",
+    }
+  }
+}
+```
+
+| Field                    | Description                  | Default         |
+|--------------------------|------------------------------|-----------------|
+| `cache_dir`              | Local cache storage          | Required        |
+| `chunk_size`             | Initial chunk size for reads | `10MB`          |
+| `disk_cache_size`        | Max disk cache size          | `0` (unlimited) |
+| `cache_expiry`           | Chunk expiry time            | `1h`            |
+| `cache_cleanup_interval` | Cache cleanup frequency      | `10m`           |
+| `daemon_timeout`         | Idle timeout before unmount  | `""` (never)    |
+| `uid`                    | File owner UID               | Current user    |
+| `gid`                    | File owner GID               | Current group   |
+| `umask`                  | Permission mask              | `022`           |
+| `allow_other`            | Allow other users to access  | `false`         |
+| `default_permissions`    | Enable permission checks     | `false`         |
+
+### Rclone Configuration
+
+```json
+{
+  "mount": {
+    "type": "rclone",
+    "mount_path": "/mnt/decypharr",
+    "rclone": {
+      "cache_dir": "/cache/rclone",
+      "vfs_cache_mode": "writes",
+      "vfs_cache_max_size": "10GB",
+      "vfs_read_chunk_size": "128MB",
+      "vfs_read_ahead": "256MB",
+      "buffer_size": "16MB",
+      "transfers": 4,
+      "uid": 1000,
+      "gid": 1000
+    }
+  }
+}
+```
+
+| Field                 | Description                        | Default         |
+|-----------------------|------------------------------------|-----------------|
+| `cache_dir`           | VFS cache directory                | Required        |
+| `vfs_cache_mode`      | `off`, `minimal`, `writes`, `full` | `writes`        |
+| `vfs_cache_max_size`  | Max VFS cache size                 | `0` (unlimited) |
+| `vfs_read_chunk_size` | Read chunk size                    | `128MB`         |
+| `vfs_read_ahead`      | Read-ahead buffer                  | `0`             |
+| `buffer_size`         | I/O buffer size                    | `16MB`          |
+| `bw_limit`            | Bandwidth limit                    | `0` (unlimited) |
+| `transfers`           | Concurrent transfers               | `4`             |
+| `uid` / `gid`         | File ownership                     | Current user    |
+
+### External Rclone
+
+```json
+{
+  "mount": {
+    "type": "external_rclone",
+    "external_rclone": {
+      "rc_url": "http://localhost:5572",
+      "rc_username": "user",
+      "rc_password": "pass"
+    }
+  }
+}
+```
+
+Connect to an existing Rclone instance's RC API.
+
+## NFS Server
+
+NFS is independent of the local mount type. It exposes the same built-in and custom libraries as a read-only NFSv4
+filesystem. See the [NFS guide](./shares/nfs/) for mount commands.
+
+~~~json
+{
+  "nfs": {
+    "enabled": true,
+    "bind_address": "0.0.0.0",
+    "port": 20490,
+    "allowed_networks": [
+      "192.168.1.0/24"
+    ]
+  }
+}
+~~~
+
+| Field            | Description                                             | Default               |
+|------------------|---------------------------------------------------------|-----------------------|
+| enabled          | Start the NFSv4 server                                  | false                 |
+| bind_address     | Listen address; inherits the main server's when unset   | 0.0.0.0               |
+| port             | TCP listen port (clients pass it with `port=`)          | 20490                 |
+| allowed_networks | Client CIDRs or IPs allowed to mount and browse exports | Private networks only |
+
+NFSv4 is a single listener: there is no mount service, portmapper, or advertised-port mapping. Reads stream
+directly from the source unless you enable the [share cache](#share-cache).
+
+## SMB Server (experimental)
+
+SMB exposes the same libraries as one read-only share. Sessions are signed but not encrypted, so serve trusted
+networks only. See the [SMB guide](./shares/smb/) for connection commands.
+
+~~~json
+{
+  "smb": {
+    "enabled": true,
+    "bind_address": "0.0.0.0",
+    "port": 1445,
+    "share_name": "decypharr",
+    "username": "media",
+    "password": "change-me",
+    "allowed_networks": [
+      "192.168.1.0/24"
+    ]
+  }
+}
+~~~
+
+| Field            | Description                                              | Default               |
+|------------------|----------------------------------------------------------|-----------------------|
+| enabled          | Start the SMB server                                     | false                 |
+| bind_address     | Listen address; inherits the main server's when unset    | 0.0.0.0               |
+| port             | TCP listen port (Windows needs the host's 445 mapped)    | 1445                  |
+| share_name       | Name of the single exported share                        | decypharr             |
+| username         | Account for every session; no anonymous access           | —                     |
+| password         | Password for the account (required)                      | —                     |
+| require_signing  | Refuse clients that will not sign                        | false                 |
+| allowed_networks | Client CIDRs or IPs allowed to connect                   | Private networks only |
+
+## Share Cache
+
+The NFS and SMB servers can read through one on-disk cache. It is **off by default**. When on, it keeps the parts
+clients read more than once — file headers, and the recently played part of a stream — so seeks and library scans do
+not open a new debrid session for bytes that were already fetched. It does not cache whole files, and it does not
+apply to WebDAV or the local mount.
+
+~~~json
+{
+  "share_cache": {
+    "enabled": true,
+    "dir": "/app/share-cache",
+    "max_size": "10GB",
+    "max_age": "24h",
+    "chunk_size": "4MB",
+    "read_ahead": "16MB"
+  }
+}
+~~~
+
+| Field      | Description                                                       | Default                    |
+|------------|-------------------------------------------------------------------|----------------------------|
+| enabled    | Cache reads on disk; off streams straight from the source          | false                      |
+| dir        | Directory the cache owns                                           | `<config dir>/share-cache` |
+| max_size   | Disk budget for cached content                                     | 10GB                       |
+| max_age    | Content nothing reads for this long is dropped                     | 24h                        |
+| chunk_size | Base fetch size; doubles up to 16x while a stream stays sequential | 4MB                        |
+| read_ahead | Fetched beyond each read so a sequential stream does not stall     | 16MB                       |
+
+Put the cache directory on ext4, XFS, or APFS. To stay inside the budget while a client holds a large file open, the
+cache releases blocks behind the read head. ZFS and some overlay filesystems refuse this, so the size limit becomes
+advisory and the directory can grow past it. Decypharr logs a warning when that happens. Set a smaller `max_size`, or
+move the cache to another filesystem.
+
+## Health Checker
+
+```json
+{
+  "repair": {
+    "enabled": true,
+    "source": "arr",
+    "schedule": "0 4 * * *",
+    "workers": 5,
+    "strategy": "per_entry",
+    "recheck_interval": "168h",
+    "auto_repair": true,
+    "nntp_connection_percent": 20
+  }
+}
+```
+
+| Field                     | Description                                                                | Default     |
+|---------------------------|----------------------------------------------------------------------------|-------------|
+| `enabled`                 | Master switch for the recurring sweep                                      | `false`     |
+| `source`                  | `arr` (walk Arr media) or `managed` (walk managed entries)                 | `arr`       |
+| `schedule`                | Cron expression. Required when enabled                                     | —           |
+| `workers`                 | Concurrent probe workers                                                   | `5`         |
+| `strategy`                | `per_entry` (stop at first broken file) or `per_file` (probe every file)   | `per_entry` |
+| `recheck_interval`        | How long a healthy entry stays fresh before becoming a candidate again     | `168h`      |
+| `arrs`                    | Optional Arr filter when `source=arr`. Empty = all eligible                | `[]`        |
+| `auto_repair`             | When `true`, broken Arr-managed files are deleted and searched again through Arr | `false` |
+| `nntp_connection_percent` | Share of NNTP connections probes may use, to avoid starving downloads      | `20`        |
+
+See the [Health Checker & Repair guide](../repair/) for the full model, API, and Browse-page integration.
+
+## Arr Configuration
+
+```json
+{
+  "arrs": [
+    {
+      "name": "Sonarr",
+      "host": "http://sonarr:8989",
+      "token": "API_TOKEN",
+      "skip_repair": false,
+      "download_uncached": false,
+      "selected_debrid": ""
+    }
+  ]
+}
+```
+
+| Field               | Description                      | Default     |
+|---------------------|----------------------------------|-------------|
+| `name`              | Display name                     | Required    |
+| `host`              | Arr URL                          | Required    |
+| `token`             | Arr API key                      | Required    |
+| `skip_repair`       | Skip repair for this Arr         | `false`     |
+| `download_uncached` | Download uncached torrents       | `false`     |
+| `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
+| `source`            | Config source (`auto`, `config`) | `config`    |
+
+## Queue Cleanup
+
+Decypharr periodically scans each connected Arr's **Activity → Queue** and acts on stuck or
+failed downloads based on a global, rules-driven policy. This is configured once (not per-Arr)
+under **Settings → Arrs → Queue Cleanup Actions** in the Web UI, and stored in the
+`queue_cleanup` block of `config.json`. See the [Arrs guide](../arrs/#queue-cleanup) for a
+walkthrough.
+
+```json
+{
+  "queue_cleanup": {
+    "rules": [
+      { "id": "failed_download", "action": "blacklist_research" },
+      { "id": "title_mismatch", "action": "import" },
+      { "id": "no_eligible_files", "action": "blacklist_research" },
+      { "match": "stalled with no connections", "action": "blacklist" }
+    ]
+  }
+}
+```
+
+Each rule resolves a queue issue to one **action**:
+
+| Action               | Effect                                                                    |
+|----------------------|---------------------------------------------------------------------------|
+| `""` (ignore)        | Leave the item in the queue, do nothing                                    |
+| `import`             | Force a manual import of the downloaded files                             |
+| `blacklist`          | Blocklist the release and remove it, **without** searching for a new one  |
+| `blacklist_research` | Blocklist the release, remove it, and trigger a re-search                  |
+
+Rules are evaluated top-to-bottom, **first match wins**. Built-in catalog rules (those with an
+`id`) always run before custom rules (those with a `match`), and unmatched warnings/errors are
+left untouched. Changes apply on the next cleanup cycle — **no restart required**.
+
+### Built-in catalog rules
+
+| `id`                 | Triggered by                                            | Default action       |
+|----------------------|---------------------------------------------------------|----------------------|
+| `failed_download`    | Download reported as failed                             | `blacklist_research` |
+| `title_mismatch`     | Title mismatch; automatic import not possible           | `import`             |
+| `matched_by_id`      | Release matched to series/movie by ID                   | `import`             |
+| `unable_to_parse`    | Unable to parse the download                            | `blacklist_research` |
+| `no_eligible_files`  | No files eligible for import                            | `blacklist_research` |
+| `episodes_missing`   | Episodes not imported / missing from the release        | `blacklist_research` |
+| `file_empty`         | Downloaded file is empty                                | `blacklist_research` |
+| `invalid_local_path` | Invalid local path (needs a Remote Path Mapping)        | `""` (ignore)        |
+| `not_grabbed`        | Not grabbed by the Arr / no category                    | `""` (ignore)        |
+
+For catalog rules you only set `action`; the match text is fixed. **Custom rules** use a
+`match` field instead of an `id` — a case-insensitive substring tested against the queue
+item's status message text (e.g. `"stalled with no connections"`).
+
+## Environment Variables
+
+All config options support environment variable overrides using double underscore notation:
+
+```bash
+# Server
+PORT=8282
+LOG_LEVEL=debug
+
+# Debrid
+DEBRIDS__0__PROVIDER=realdebrid
+DEBRIDS__0__API_KEY=your_key
+
+# Usenet
+USENET__MAX_CONNECTIONS=20
+USENET__BODY_PIPELINE_DEPTH=2
+USENET__STREAM_BACKUP_WAIT=250ms
+USENET__PROVIDERS__0__HOST=news.provider.com
+USENET__PROVIDERS__0__PORT=563
+USENET__PROVIDERS__0__BACKBONE=Omicron
+
+# Mount - DFS
+MOUNT__DFS__CACHE_DIR=/cache
+MOUNT__DFS__CHUNK_SIZE=10MB
+
+# Repair
+REPAIR__ENABLED=true
+REPAIR__INTERVAL=30m
+```
+
+See [defaults.go](https://github.com/sirrobot01/decypharr/blob/main/internal/config/defaults.go) for all defaults.

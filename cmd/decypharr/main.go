@@ -3,24 +3,24 @@ package decypharr
 import (
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/qbit"
-	"github.com/sirrobot01/decypharr/pkg/server"
-	"github.com/sirrobot01/decypharr/pkg/version"
-	"github.com/sirrobot01/decypharr/pkg/web"
-	"github.com/sirrobot01/decypharr/pkg/webdav"
-	"github.com/sirrobot01/decypharr/pkg/wire"
-	"net/http"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"sync"
+
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/pkg/mount/dfs"
+	"github.com/sirrobot01/decypharr/pkg/mount/external"
+	"github.com/sirrobot01/decypharr/pkg/mount/rclone"
+	"github.com/sirrobot01/decypharr/pkg/server"
+	"github.com/sirrobot01/decypharr/pkg/share"
+	"github.com/sirrobot01/decypharr/pkg/version"
 )
 
 func Start(ctx context.Context) error {
-
 	if umaskStr := os.Getenv("UMASK"); umaskStr != "" {
 		umask, err := strconv.ParseInt(umaskStr, 8, 32)
 		if err != nil {
@@ -30,12 +30,14 @@ func Start(ctx context.Context) error {
 	}
 
 	restartCh := make(chan struct{}, 1)
-	web.SetRestartFunc(func() {
+	restartFunc := func() {
 		select {
 		case restartCh <- struct{}{}:
 		default:
 		}
-	})
+	}
+
+	mgr := manager.New()
 
 	svcCtx, cancelSvc := context.WithCancel(ctx)
 	defer cancelSvc()
@@ -59,69 +61,86 @@ func Start(ctx context.Context) error {
 `, version.GetInfo(), cfg.LogLevel)
 
 		// Initialize services
-		qb := qbit.New()
-		wd := webdav.New()
+		mountMgr := createMountManager(mgr, cfg)
+		mgr.SetMountManager(mountMgr)
+		srv := server.New(mgr)
 
-		ui := web.New().Routes()
-		webdavRoutes := wd.Routes()
-		qbitRoutes := qb.Routes()
+		srv.SetRestartFunc(restartFunc)
 
-		// Register routes
-		handlers := map[string]http.Handler{
-			"/":       ui,
-			"/api/v2": qbitRoutes,
-			"/webdav": webdavRoutes,
-		}
-		srv := server.New(handlers)
+		resetFunc := func() {
 
-		reset := func() {
-			// Reset the store and services
-			qb.Reset()
-			wire.Reset()
+			config.Reset()
+			// Stop manager to reset ready channel and cleanup resources
+			if err := mgr.Reset(); err != nil {
+				_log.Warn().Err(err).Msg("Failed to reset manager")
+			}
 			// refresh GC
 			runtime.GC()
 		}
 
-		done := make(chan struct{})
-		go func(ctx context.Context) {
-			if err := startServices(ctx, cancelSvc, wd, srv); err != nil {
-				_log.Error().Err(err).Msg("Error starting services")
-				cancelSvc()
+		shutdownFunc := func() {
+			config.Reset()
+			// Stop manager to cleanup all resources including mounts
+			if err := mgr.Stop(); err != nil {
+				_log.Warn().Err(err).Msg("Failed to stop manager during shutdown")
 			}
-			close(done)
+			// refresh GC
+			runtime.GC()
+		}
+
+		serviceResult := make(chan error, 1)
+		go func(ctx context.Context) {
+			serviceResult <- startServices(ctx, mgr, cancelSvc, srv)
 		}(svcCtx)
 
 		select {
 		case <-ctx.Done():
-			// graceful shutdown
-			cancelSvc() // propagate to services
-			<-done      // wait for them to finish
+			cancelSvc()
+			<-serviceResult
 			_log.Info().Msg("Decypharr has been stopped gracefully.")
-			reset() // reset store and services
+			shutdownFunc()
 			return nil
 
 		case <-restartCh:
-			cancelSvc() // tell existing services to shut down
+			cancelSvc()
 			_log.Info().Msg("Restarting Decypharr...")
-			<-done // wait for them to finish
+			<-serviceResult
 			_log.Info().Msg("Decypharr has been restarted.")
-			reset() // reset store and services
-			// rebuild svcCtx off the original parent
+			resetFunc()
 			svcCtx, cancelSvc = context.WithCancel(ctx)
+
+		case err := <-serviceResult:
+			cancelSvc()
+			if err != nil {
+				_log.Error().Err(err).Msg("Service stopped unexpectedly")
+			}
+			shutdownFunc()
+			return err
 		}
 	}
 }
 
-func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav.WebDav, srv *server.Server) error {
+func createMountManager(mgr *manager.Manager, cfg *config.Config) manager.MountManager {
+	switch cfg.Mount.Type {
+	case config.MountTypeRclone:
+		return rclone.NewManager(mgr)
+	case config.MountTypeDFS:
+		return dfs.NewManager(mgr)
+	case config.MountTypeExternalRclone:
+		return external.NewManager(mgr)
+	default:
+		return manager.NewStubMountManager()
+	}
+}
+
+func startServices(ctx context.Context, manager *manager.Manager, cancelSvc context.CancelFunc, srv *server.Server) error {
 	var wg sync.WaitGroup
-	errChan := make(chan error)
+	errChan := make(chan error, 3)
 
 	_log := logger.Default()
 
 	safeGo := func(f func() error) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
@@ -138,63 +157,57 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 			if err := f(); err != nil {
 				errChan <- err
 			}
-		}()
+		})
 	}
 
-	safeGo(func() error {
-		return wd.Start(ctx)
-	})
+	// NFS and SMB export the same catalog through one cache: a second cache
+	// over the same directory would delete the first one's files. Build it
+	// before anything starts so a bad cache directory fails immediately.
+	cfg := config.Get()
+	var export *share.Export
+	if cfg.NFS.Enabled || cfg.SMB.Enabled {
+		var err error
+		if export, err = share.NewExport(ctx, manager, cfg.ShareCache); err != nil {
+			return err
+		}
+		defer func() {
+			if err := export.Close(); err != nil {
+				_log.Error().Err(err).Msg("Failed to close share export")
+			}
+		}()
+	}
 
 	safeGo(func() error {
 		return srv.Start(ctx)
 	})
 
-	// Start rclone RC server if enabled
+	// Start manager (which handles mounts, processing, etc.)
 	safeGo(func() error {
-		rcManager := wire.Get().RcloneManager()
-		if rcManager == nil {
-			return nil
-		}
-		return rcManager.Start(ctx)
+		return manager.Start(ctx)
 	})
 
-	if cfg := config.Get(); cfg.Repair.Enabled {
+	if cfg.NFS.Enabled {
+		nfs := share.NewNFS(manager, export, cfg.NFS)
 		safeGo(func() error {
-			repair := wire.Get().Repair()
-			if repair != nil {
-				if err := repair.Start(ctx); err != nil {
-					_log.Error().Err(err).Msg("repair failed")
-				}
-			}
-			return nil
+			return nfs.Start(ctx)
 		})
 	}
 
-	safeGo(func() error {
-		wire.Get().StartWorkers(ctx)
-		return nil
-	})
+	if cfg.SMB.Enabled {
+		smb := share.NewSMB(manager, export, cfg.SMB)
+		safeGo(func() error {
+			return smb.Start(ctx)
+		})
+	}
 
-	go func() {
+	select {
+	case <-ctx.Done():
 		wg.Wait()
-		close(errChan)
-	}()
-
-	go func() {
-		for err := range errChan {
-			if err != nil {
-				_log.Error().Err(err).Msg("Service error detected")
-				// If the error is critical, return it to stop the main loop
-				if ctx.Err() == nil {
-					_log.Error().Msg("Stopping services due to error")
-					cancelSvc() // Cancel the service context to stop all services
-				}
-			}
-		}
-	}()
-
-	// Wait for context cancellation
-	<-ctx.Done()
-	_log.Debug().Msg("Services context cancelled")
-	return nil
+		_log.Debug().Msg("Services context cancelled")
+		return nil
+	case err := <-errChan:
+		cancelSvc()
+		wg.Wait()
+		return err
+	}
 }

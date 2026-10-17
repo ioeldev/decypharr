@@ -28,3 +28,13 @@ var EmptyDownloadLinkError = &Error{
 	Message: "Download link is empty",
 	Code:    "empty_download_link",
 }
+
+var InvalidDownloadLinkError = &Error{
+	Message: "Download link is invalid",
+	Code:    "invalid_download_link",
+}
+
+var ErrAvailabilityUnsupported = &Error{
+	Message: "Availability checks are not supported",
+	Code:    "availability_unsupported",
+}

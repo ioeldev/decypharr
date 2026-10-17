@@ -1,8 +1,9 @@
 package alldebrid
 
 import (
-	"encoding/json"
 	"fmt"
+
+	json "github.com/bytedance/sonic"
 )
 
 type errorResponse struct {
@@ -42,9 +43,17 @@ type Magnets []magnetInfo
 type TorrentInfoResponse struct {
 	Status string `json:"status"`
 	Data   struct {
-		Magnets magnetInfo `json:"magnets"`
+		Magnets Magnets `json:"magnets"`
 	} `json:"data"`
 	Error *errorResponse `json:"error"`
+}
+
+type restartMagnetResponse struct {
+	Status string         `json:"status"`
+	Error  *errorResponse `json:"error"`
+	Data   struct {
+		Message string `json:"message"`
+	} `json:"data"`
 }
 
 type TorrentsListResponse struct {
@@ -71,16 +80,32 @@ type UploadMagnetResponse struct {
 	Error *errorResponse `json:"error"`
 }
 
+type UploadFileResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Files []struct {
+			File  string         `json:"file"`
+			Name  string         `json:"name"`
+			Hash  string         `json:"hash"`
+			ID    int            `json:"id"`
+			Size  int64          `json:"size"`
+			Ready bool           `json:"ready"`
+			Error *errorResponse `json:"error"`
+		} `json:"files"`
+	} `json:"data"`
+	Error *errorResponse `json:"error"`
+}
+
 type DownloadLink struct {
 	Status string `json:"status"`
 	Data   struct {
-		Link      string        `json:"link"`
-		Host      string        `json:"host"`
-		Filename  string        `json:"filename"`
-		Streaming []interface{} `json:"streaming"`
-		Paws      bool          `json:"paws"`
-		Filesize  int           `json:"filesize"`
-		Id        string        `json:"id"`
+		Link      string `json:"link"`
+		Host      string `json:"host"`
+		Filename  string `json:"filename"`
+		Streaming []any  `json:"streaming"`
+		Paws      bool   `json:"paws"`
+		Filesize  int    `json:"filesize"`
+		Id        string `json:"id"`
 		Path      []struct {
 			Name string `json:"n"`
 			Size int    `json:"s"`
@@ -89,11 +114,21 @@ type DownloadLink struct {
 	Error *errorResponse `json:"error"`
 }
 
+type LinkInfosResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Infos []struct {
+			Error *errorResponse `json:"error"`
+		} `json:"infos"`
+	} `json:"data"`
+	Error *errorResponse `json:"error"`
+}
+
 // UnmarshalJSON implements custom unmarshaling for Magnets type
-// It can handle both an array of magnetInfo objects or a map with string keys.
+// It can handle an array, a map with string keys, or a single magnetInfo object.
 // If the input is an array, it will be unmarshaled directly into the Magnets slice.
 // If the input is a map, it will extract the values and append them to the Magnets slice.
-// If the input is neither, it will return an error.
+// A single object is retained for compatibility with older API responses.
 func (m *Magnets) UnmarshalJSON(data []byte) error {
 	// Try to unmarshal as array
 	var arr []magnetInfo
@@ -110,6 +145,14 @@ func (m *Magnets) UnmarshalJSON(data []byte) error {
 		}
 		return nil
 	}
+
+	// Try to unmarshal as a single magnet
+	var magnet magnetInfo
+	if err := json.Unmarshal(data, &magnet); err == nil {
+		*m = Magnets{magnet}
+		return nil
+	}
+
 	return fmt.Errorf("magnets: unsupported JSON format")
 }
 
@@ -130,4 +173,18 @@ type UserProfileResponse struct {
 			Notifications        []string       `json:"notifications"`
 		} `json:"user"`
 	} `json:"data"`
+}
+
+type LinksListResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Links []struct {
+			Link     string `json:"link"`
+			Filename string `json:"filename"`
+			Size     int64  `json:"size"`
+			Host     string `json:"host"`
+			Date     int64  `json:"date"`
+		} `json:"links"`
+	} `json:"data"`
+	Error *errorResponse `json:"error"`
 }
