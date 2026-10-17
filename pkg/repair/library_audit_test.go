@@ -181,7 +181,11 @@ func TestLibraryRepairVerifiesOriginalReinsertion(t *testing.T) {
 	service.reacquirer = fake
 	h := &storage.EntryHealth{EntryName: "library:restored", Status: storage.HealthBroken, BrokenFiles: []storage.BrokenFile{{LibraryAudit: true, ArrName: "movies", ArrKind: storage.ArrKindRadarr, SourcePath: path}}}
 	var mu sync.Mutex
-	service.healBrokenEntry(context.Background(), &storage.RepairRun{ID: "repair"}, &mu, h)
+	run := &storage.RepairRun{ID: "repair"}
+	service.healBrokenEntry(context.Background(), run, &mu, h)
+	if run.Stats.Restored != 1 || run.Stats.Queued != 0 || run.Stats.Repaired != 1 {
+		t.Fatalf("readable path counted as queued: %+v", run.Stats)
+	}
 	if h.Status != storage.HealthHealthy || len(fake.libraryRequests) != 0 {
 		t.Fatalf("readable path repaired destructively: %+v", h)
 	}

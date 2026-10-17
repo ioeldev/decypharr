@@ -153,6 +153,24 @@ when backing up the application.
 The authenticated queue API is `GET /api/arr/reacquire/queue`. Pause or resume with
 `POST /api/arr/reacquire/queue`, body `{"paused": true}` or `{"paused": false}`.
 
+### Recovery progress in the UI
+
+The Health Checker distinguishes **Queued** recovery requests from **Restored**
+files confirmed readable immediately. A finished **Fix broken** run shows
+**Submission complete**; recovery can still be running. Older run totals are
+labelled **Recovery requested (legacy)** because the two outcomes were not
+recorded separately.
+
+The **Recovery progress** panel polls while jobs remain outstanding, including
+after submission finishes. It shows queued, working, waiting for grab, downloading,
+waiting for import, imported, needs attention, failed, and cancelled jobs, with a
+link to the detailed Arr Reacquisition table. Imported means Arr confirmed a
+replacement; it is not a new filesystem read test.
+
+These live totals cover all retained repair jobs across runs, not a single scan
+or a count of media files. Clearing or expiring terminal job history changes the
+totals. Unavailable progress is marked stale and retried automatically.
+
 ## Configuration
 
 ```json

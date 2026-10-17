@@ -38,7 +38,7 @@
                         <span id="brokenCountBadge" class="badge badge-error badge-sm ml-1 hidden">0</span>
                     </button>
                     <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm w-full sm:w-auto"
-                            title="Trigger Arr delete + re-search on currently broken entries">
+                            title="Queue recovery for currently broken entries">
                         <i class="bi bi-bandaid mr-1"></i>Fix broken
                     </button>
                     <button id="clearStateBtn" class="btn btn-warning btn-outline btn-sm w-full sm:w-auto"
@@ -60,7 +60,7 @@
                     <div class="flex flex-wrap items-center gap-2">
                         <div class="font-medium">
                             <i class="bi bi-arrow-repeat animate-spin mr-1"></i>
-                            Sweep in progress
+                            <span id="activeRunTitle">Sweep in progress</span>
                         </div>
                         <span class="badge badge-ghost" id="activeRunStage">-</span>
                     </div>
@@ -79,6 +79,21 @@
                     <!-- filled by JS -->
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h3 class="card-title text-xl">Recovery progress</h3>
+                <a href="{{.URLBase}}repair/reacquire" class="link link-primary">View recovery jobs</a>
+            </div>
+            <p class="text-sm opacity-70">Fix broken submits recovery jobs. Submission complete does not mean the replacements have been imported.</p>
+            <p id="recoveryQueueLine" class="text-sm" role="status">Loading recovery status…</p>
+            <div id="recoveryCountsGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
+            <progress id="recoveryProgress" class="progress progress-success w-full" value="0" max="1" aria-label="Imported repair jobs"></progress>
+            <p id="recoveryProgressLabel" class="text-xs opacity-70"></p>
+            <p class="text-xs opacity-60">Totals cover all retained repair jobs, across runs. Imported means Arr confirmed a replacement; a library audit verifies readability. Counts change when job history is cleared or expires.</p>
         </div>
     </div>
 
@@ -144,16 +159,18 @@
             </div>
         </div>
         <div class="card-body p-0">
+            <p class="text-xs opacity-70 px-4 py-3">Queued counts accepted recovery requests; Restored counts files confirmed readable immediately. Older runs show Recovery requested because these outcomes were not recorded separately.</p>
             <div class="overflow-x-auto">
                 <table class="table table-hover">
                     <thead class="bg-base-200">
                     <tr>
                         <th>Started</th>
                         <th>Trigger</th>
-                        <th>Status</th>
+                        <th>Run status</th>
                         <th>Probed</th>
                         <th>Broken</th>
-                        <th>Repaired</th>
+                        <th>Queued</th>
+                        <th>Restored</th>
                         <th>Cleared</th>
                         <th>Duration</th>
                         <th>Error</th>

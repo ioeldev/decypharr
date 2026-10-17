@@ -211,7 +211,9 @@ class RepairManager {
                 <div>Probed: <strong>${stats.probed ?? 0}</strong></div>
                 <div class="${stats.broken ? 'text-error' : ''}">Broken: <strong>${stats.broken ?? 0}</strong></div>
                 <div class="${stats.healthy ? 'text-success' : ''}">Healthy: <strong>${stats.healthy ?? 0}</strong></div>
-                <div class="${stats.repaired ? 'text-success' : ''}">Repaired: <strong>${stats.repaired ?? 0}</strong></div>
+                <div>Queued: <strong>${stats.queued ?? 0}</strong></div>
+                <div>Restored: <strong>${stats.restored ?? 0}</strong></div>
+                ${this.legacyRecoveryRequests(stats) ? `<div>Recovery requested (legacy): <strong>${this.legacyRecoveryRequests(stats)}</strong></div>` : ''}
                 <div class="${stats.repair_failed ? 'text-error' : ''}">Repair fail: <strong>${stats.repair_failed ?? 0}</strong></div>
             </div>
             ${run.error ? `<div class="mt-2 text-error text-xs">${this.escape(run.error)}</div>` : ''}
@@ -350,9 +352,12 @@ class RepairManager {
         try {
             const status = await this.fetchJSON(`${this.api}/repair/status`);
             this.renderStatus(status || {});
+            await this.loadRecoveryProgress();
             this.scheduleStatusPoll(status);
         } catch (e) {
             console.error('Failed to load status', e);
+            await this.loadRecoveryProgress();
+            this.scheduleStatusPoll(this.latestStatus);
         }
     }
 
@@ -371,8 +376,59 @@ class RepairManager {
             clearTimeout(this.statusTimer);
             this.statusTimer = null;
         }
-        const delay = isRunning ? 2000 : 15000;
+        const delay = isRunning ? 2000 : (this.recoveryPending ? 5000 : 15000);
         this.statusTimer = setTimeout(() => this.loadStatus(), delay);
+    }
+
+    async loadRecoveryProgress() {
+        const line = document.getElementById('recoveryQueueLine');
+        try {
+            const q = await this.fetchJSON(`${this.api}/arr/reacquire/queue`);
+            const counts = q.status_counts || {};
+            this.recoveryPending = q.queued + q.in_flight > 0;
+            const next = q.next_allowed_at ? new Date(q.next_allowed_at) : null;
+            const wait = next && next > new Date() ? ` Next start: ${next.toLocaleTimeString()}.` : '';
+            line.textContent = `${q.paused ? 'New recoveries paused.' : 'Recovery queue active.'} ${q.in_flight}/${q.max_active} active slots.${wait}${q.error ? ` ${q.error}` : ''}`;
+            const working = ['resolving', 'invalidating', 'blocklisting', 'searching'].reduce((n, key) => n + (counts[key] || 0), 0)
+                + Math.max(0, (counts.queued || 0) - q.queued);
+            const tiles = [
+                ['Queued', q.queued], ['Working', working],
+                ['Waiting for grab', counts.waiting_for_grab || 0],
+                ['Downloading', counts.waiting_for_download || 0],
+                ['Waiting for import', counts.waiting_for_import || 0],
+                ['Imported', counts.ready || 0], ['Needs attention', counts.needs_attention || 0],
+                ['Failed', counts.failed || 0], ['Cancelled', counts.cancelled || 0],
+            ];
+            const grid = document.getElementById('recoveryCountsGrid');
+            grid.innerHTML = '';
+            for (const [label, count] of tiles) {
+                const tile = document.createElement('div');
+                tile.className = 'bg-base-200 rounded p-2';
+                tile.innerHTML = `<div class="text-xs opacity-70">${label}</div><div class="font-mono text-lg">${count}</div>`;
+                grid.appendChild(tile);
+            }
+            const imported = counts.ready || 0;
+            const progress = document.getElementById('recoveryProgress');
+            progress.max = Math.max(1, q.total || 0);
+            progress.value = imported;
+            document.getElementById('recoveryProgressLabel').textContent = `${imported} of ${q.total || 0} retained repair jobs imported. Updated ${new Date().toLocaleTimeString()}.`;
+            grid.classList.remove('opacity-50');
+        } catch (e) {
+            this.recoveryPending = true;
+            line.textContent = 'Recovery status unavailable. Displayed counts may be out of date; retrying automatically.';
+            document.getElementById('recoveryCountsGrid')?.classList.add('opacity-50');
+        }
+    }
+
+    legacyRecoveryRequests(stats) {
+        return Math.max(0, (stats.repaired || 0) - (stats.queued || 0) - (stats.restored || 0));
+    }
+
+    runStatusBadge(run) {
+        if (run.status === 'completed' && (run.source || '').startsWith('fix-broken:')) {
+            return '<span class="badge badge-info">Submission complete</span>';
+        }
+        return this.statusBadge(run.status);
     }
 
     renderStatus(status) {
@@ -405,6 +461,7 @@ class RepairManager {
             run.disabled = true;
             panel.classList.remove('hidden');
             this.activeRunId = status.active_run.id;
+            document.getElementById('activeRunTitle').textContent = (status.active_run.source || '').startsWith('fix-broken:') ? 'Submitting recovery jobs' : 'Sweep in progress';
             document.getElementById('activeRunStage').textContent = status.active_run.stage || 'running';
             document.getElementById('activeRunIdText').textContent = status.active_run.id || '-';
             document.getElementById('activeRunStarted').textContent = status.active_run.started_at
@@ -451,10 +508,14 @@ class RepairManager {
             ['probed', 'Probed'],
             ['healthy', 'Healthy'],
             ['broken', 'Broken'],
-            ['repaired', 'Repaired'],
+            ['queued', 'Queued'],
+            ['restored', 'Restored'],
             ['cleared', 'Cleared'],
 			['repair_failed', 'Repair fail'],
         ];
+        const legacy = this.legacyRecoveryRequests(stats);
+        if (legacy) fields.push(['legacy_requests', 'Recovery requested (legacy)']);
+        stats = {...stats, legacy_requests: legacy};
         container.innerHTML = '';
         for (const [k, label] of fields) {
 			const el = document.createElement('div');
@@ -738,10 +799,11 @@ class RepairManager {
             tr.innerHTML = `
                 <td class="font-mono text-sm">${start ? start.toLocaleString() : '-'}</td>
                 <td>${run.trigger || '-'}</td>
-                <td>${this.statusBadge(run.status)}</td>
+                <td>${this.runStatusBadge(run)}</td>
                 <td>${run.stats?.probed ?? 0}</td>
                 <td class="${run.stats?.broken ? 'text-error font-medium' : ''}">${run.stats?.broken ?? 0}</td>
-                <td class="${run.stats?.repaired ? 'text-success font-medium' : ''}">${run.stats?.repaired ?? 0}</td>
+                <td>${run.stats?.queued ?? 0}${this.legacyRecoveryRequests(run.stats || {}) ? `<div class="text-xs opacity-70">${this.legacyRecoveryRequests(run.stats || {})} recovery requested (legacy)</div>` : ''}</td>
+                <td>${run.stats?.restored ?? 0}</td>
                 <td class="${run.stats?.cleared ? 'text-warning font-medium' : ''}">${run.stats?.cleared ?? 0}</td>
                 <td>${duration}</td>
                 <td class="text-xs text-error">${run.error || ''}</td>

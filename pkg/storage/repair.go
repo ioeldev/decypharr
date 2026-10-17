@@ -53,7 +53,10 @@ type RepairRunStats struct {
 	Healthy      int `json:"healthy"`
 	Broken       int `json:"broken"`
 	Unknown      int `json:"unknown"`
+	// Repaired is retained for API/history compatibility: queued plus restored.
 	Repaired     int `json:"repaired"`
+	Queued       int `json:"queued"`
+	Restored     int `json:"restored"`
 	Cleared      int `json:"cleared,omitempty"`
 	RepairFailed int `json:"repair_failed"`
 }

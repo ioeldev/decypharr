@@ -38,6 +38,8 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 	}
 
 	initiated := 0
+	queued := 0
+	restoredCount := 0
 	failed := 0
 	for _, broken := range health.BrokenFiles {
 		if ctx != nil && ctx.Err() != nil {
@@ -55,6 +57,7 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 			}
 			if restored {
 				initiated++
+				restoredCount++
 				health.Status = storage.HealthHealthy
 				health.BrokenCount = 0
 				health.BrokenFiles = nil
@@ -67,6 +70,7 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 		switch {
 		case err == nil:
 			initiated++
+			queued++
 			r.logger.Info().
 				Str("arr", broken.ArrName).
 				Str("entry_id", broken.InfoHash).
@@ -90,6 +94,8 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 	r.saveHealth(health)
 	statsMu.Lock()
 	run.Stats.Repaired += initiated
+	run.Stats.Queued += queued
+	run.Stats.Restored += restoredCount
 	run.Stats.RepairFailed += failed
 	r.saveRun(run)
 	statsMu.Unlock()

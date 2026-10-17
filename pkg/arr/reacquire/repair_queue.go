@@ -23,16 +23,18 @@ type repairQueueState struct {
 }
 
 type RepairQueueStatus struct {
-	Queued        int       `json:"queued"`
-	InFlight      int       `json:"in_flight"`
-	InBatch       int       `json:"in_batch"`
-	NextAllowedAt time.Time `json:"next_allowed_at,omitzero"`
-	Interval      string    `json:"interval"`
-	BatchSize     int       `json:"batch_size"`
-	BatchPause    string    `json:"batch_pause"`
-	MaxActive     int       `json:"max_active"`
-	Paused        bool      `json:"paused"`
-	Error         string    `json:"error,omitempty"`
+	Queued        int            `json:"queued"`
+	Total         int            `json:"total"`
+	StatusCounts  map[Status]int `json:"status_counts"`
+	InFlight      int            `json:"in_flight"`
+	InBatch       int            `json:"in_batch"`
+	NextAllowedAt time.Time      `json:"next_allowed_at,omitzero"`
+	Interval      string         `json:"interval"`
+	BatchSize     int            `json:"batch_size"`
+	BatchPause    string         `json:"batch_pause"`
+	MaxActive     int            `json:"max_active"`
+	Paused        bool           `json:"paused"`
+	Error         string         `json:"error,omitempty"`
 }
 
 func (s *Service) loadRepairQueue() error {
@@ -99,10 +101,16 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 		out.Error = err.Error()
 		out.Paused = true
 	}
+	out.StatusCounts = make(map[Status]int)
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
 	for _, job := range s.jobs {
-		if job.Cause != CauseRepair || job.Status.Terminal() {
+		if job.Cause != CauseRepair {
+			continue
+		}
+		out.Total++
+		out.StatusCounts[job.Status]++
+		if job.Status.Terminal() {
 			continue
 		}
 		if job.Status == StatusQueued && job.StartedAt.IsZero() {

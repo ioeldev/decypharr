@@ -222,3 +222,48 @@ func TestQueuedOrphanAlreadyReplacedSkipsAnotherSearch(t *testing.T) {
 		t.Fatalf("already covered episode caused another recovery: %+v", current)
 	}
 }
+
+func TestRepairQueueProgressIncludesOnlyRetainedRepairJobs(t *testing.T) {
+	configureRepairQueueTest(t)
+	service, err := NewService(ServiceOptions{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	statuses := []Status{StatusQueued, StatusSearching, StatusWaitingForGrab, StatusWaitingForDownload, StatusWaitingForImport, StatusNeedsAttention, StatusReady, StatusFailed, StatusCancelled}
+	var readyID string
+	for i, status := range statuses {
+		job := queuedRepairForTest(t, service, i+1, CauseRepair)
+		if status != StatusQueued {
+			if _, err := service.updateJobDurable(job.ID, status, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if status == StatusReady {
+			readyID = job.ID
+		}
+	}
+	manual := queuedRepairForTest(t, service, 100, CauseManual)
+	if _, err := service.updateJobDurable(manual.ID, StatusReady, nil); err != nil {
+		t.Fatal(err)
+	}
+	progress := service.RepairQueueStatus()
+	if progress.Total != len(statuses) || progress.Queued != 1 || progress.InFlight != 5 {
+		t.Fatalf("progress mixes pending, terminal, or manual jobs: %+v", progress)
+	}
+	for _, status := range statuses {
+		if progress.StatusCounts[status] != 1 {
+			t.Fatalf("%s count = %d", status, progress.StatusCounts[status])
+		}
+	}
+	if _, err := service.DeleteJobs([]string{readyID}); err != nil {
+		t.Fatal(err)
+	}
+	progress = service.RepairQueueStatus()
+	if progress.Total != len(statuses)-1 || progress.StatusCounts[StatusReady] != 0 {
+		t.Fatalf("deleted job still included in retained progress: %+v", progress)
+	}
+}
