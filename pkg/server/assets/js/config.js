@@ -248,6 +248,7 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        if ($('repair.library_audit')) $('repair.library_audit').checked = !!repair.library_audit;
         if ($('repair.verify_content')) $('repair.verify_content').checked = !!repair.verify_content;
     }
 
@@ -269,6 +270,7 @@ class ConfigManager {
             strategy: $('repair.strategy')?.value || 'per_entry',
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
+            library_audit: $('repair.library_audit')?.checked || false,
             verify_content: $('repair.verify_content')?.checked || false,
             arrs,
         };

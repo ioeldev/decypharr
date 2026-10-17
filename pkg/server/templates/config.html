@@ -1761,6 +1761,10 @@ fe80::/10</textarea>
                                        id="repair.auto_repair" name="repair.auto_repair">
                                 <span class="label-text font-medium" title="Delete broken files through Arr and trigger a replacement search.">Auto-repair when broken</span>
                             </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.library_audit" name="repair.library_audit">
+                                <span class="label-text font-medium">Audit library reads on scheduled runs (64 KiB per imported file, sequential)</span>
+                            </label>
                             <label class="label cursor-pointer justify-start gap-3"
                                    title="Read each media file's head and check for a valid container signature during NZB probes. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed.">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"

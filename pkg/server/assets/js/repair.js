@@ -24,6 +24,7 @@ class RepairManager {
         $('viewBrokenBtn')?.addEventListener('click', () => this.openBrokenModal());
         $('refreshHistoryBtn')?.addEventListener('click', () => this.loadHistory());
         $('clearHistoryBtn')?.addEventListener('click', () => this.clearHistory());
+        $('runLibraryAudit')?.addEventListener('change', () => this.updateRunMode());
         $('runRepairForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             this.runNow();
@@ -58,15 +59,23 @@ class RepairManager {
         const autoRepair = document.getElementById('runAutoRepair');
         const verifyContent = document.getElementById('runVerifyContent');
         if (ignore) ignore.checked = false;
+        const audit = document.getElementById('runLibraryAudit');
+        if (audit) audit.checked = !!this.repairConfig.library_audit;
         if (autoRepair) autoRepair.checked = !!this.repairConfig.auto_repair;
         if (verifyContent) verifyContent.checked = !!this.repairConfig.verify_content;
         const protocol = document.getElementById('runProtocolAll');
         if (protocol) protocol.checked = true;
+        this.updateRunMode();
         if (typeof modal.showModal === 'function') {
             modal.showModal();
         } else {
             modal.setAttribute('open', '');
         }
+    }
+
+    updateRunMode() {
+        const audit = !!document.getElementById('runLibraryAudit')?.checked;
+        document.querySelectorAll('input[name="runProtocol"], #runVerifyContent').forEach(input => { input.disabled = audit; });
     }
 
     openClearStateModal() {
@@ -227,6 +236,7 @@ class RepairManager {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
+                    library_audit: !!document.getElementById('runLibraryAudit')?.checked,
                     ignore_last_checked: ignoreLastChecked,
                     auto_repair: autoRepair,
                     // One-off runs always probe torrents via link generation;
@@ -540,8 +550,8 @@ class RepairManager {
                 <td class="w-8">
                     <i class="bi bi-chevron-right transition-transform" id="${rowId}-caret"></i>
                 </td>
-                <td class="font-mono text-sm break-all">${this.escape(h.entry_name)}</td>
-                <td><span class="badge badge-ghost badge-sm">${this.escape(h.protocol || 'unknown')}</span></td>
+                <td class="font-mono text-sm break-all">${this.escape(h.display_name || h.entry_name)}</td>
+                <td><span class="badge badge-ghost badge-sm">${this.escape(h.library_file ? 'library' : (h.protocol || 'unknown'))}</span></td>
                 <td>${fileCount}</td>
                 <td class="text-error font-medium">${brokenCount}</td>
                 <td class="text-xs">${this.escape(reason)}</td>
@@ -648,7 +658,7 @@ class RepairManager {
             const size = f.size ? this.formatBytes(f.size) : '-';
             return `
                 <tr>
-                    <td class="font-mono text-xs break-all">${this.escape(f.file_name || '')}</td>
+                    <td class="font-mono text-xs break-all">${this.escape(f.source_path || f.file_name || '')}</td>
                     <td class="text-xs">${this.escape(f.reason || '-')}</td>
                     <td class="text-xs">${size}</td>
                     <td class="text-xs">${arr}</td>

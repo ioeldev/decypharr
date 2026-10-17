@@ -22,6 +22,10 @@ func (r *Service) RecheckEntry(ctx context.Context, entryName string, fix bool) 
 		return nil, errors.New("entry name is empty")
 	}
 	h, _ := r.storage.GetEntryHealth(entryName)
+	if h != nil && h.LibraryFile != nil {
+		_, err := r.runSweep(storage.RepairTriggerManual, RunOptions{LibraryAudit: new(true), LibraryEntries: []string{entryName}, AutoRepair: new(fix), IgnoreLastChecked: true})
+		return h, err
+	}
 	if h != nil && h.ActiveRunID != "" {
 		return nil, fmt.Errorf("entry is being probed by run %s", h.ActiveRunID)
 	}

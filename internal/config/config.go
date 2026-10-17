@@ -223,6 +223,7 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
+	LibraryAudit          bool         `json:"library_audit,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
 	// the streaming stack and check for a valid container signature, catching
@@ -243,7 +244,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && r.StopSchedule == ""
+		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == ""
 }
 
 type Config struct {

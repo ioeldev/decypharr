@@ -35,7 +35,10 @@ type Status struct {
 type RunOptions struct {
 	IgnoreLastChecked bool
 	AutoRepair        *bool
-	UnrestrictLink    bool
+	LibraryAudit      *bool
+	// LibraryEntries restricts a library recheck to persisted audit keys.
+	LibraryEntries []string
+	UnrestrictLink bool
 	// VerifyContent additionally head-verifies each NZB media file through
 	// the serving stack (container-signature check). Catches files whose
 	// articles all exist but were assembled wrong — invisible to the default
@@ -98,29 +101,33 @@ type Service struct {
 	hearsay       *hearsay.Service
 	logger        zerolog.Logger
 
-	mu             sync.Mutex
-	parentCtx      context.Context
-	activeRunID    string
-	cancelRun      context.CancelFunc
-	scheduled      bool
-	stopScheduled  bool
-	activeStopFunc func()
-	runWG          sync.WaitGroup
+	// One filesystem probe may remain blocked in FUSE after cancellation.
+	// Keep its slot occupied across runs until the syscall returns.
+	libraryProbeSlot chan struct{}
+	mu               sync.Mutex
+	parentCtx        context.Context
+	activeRunID      string
+	cancelRun        context.CancelFunc
+	scheduled        bool
+	stopScheduled    bool
+	activeStopFunc   func()
+	runWG            sync.WaitGroup
 }
 
 // New builds a repair service from its dependencies.
 func New(deps Dependencies) *Service {
 	return &Service{
-		scheduler:     deps.Scheduler,
-		backend:       deps.Backend,
-		storage:       deps.Storage,
-		arrs:          deps.Arrs,
-		reacquirer:    deps.Reacquirer,
-		usenet:        deps.Usenet,
-		notifications: deps.Notifications,
-		hearsay:       deps.Hearsay,
-		logger:        logger.New("repair"),
-		parentCtx:     context.Background(),
+		scheduler:        deps.Scheduler,
+		backend:          deps.Backend,
+		storage:          deps.Storage,
+		arrs:             deps.Arrs,
+		reacquirer:       deps.Reacquirer,
+		usenet:           deps.Usenet,
+		notifications:    deps.Notifications,
+		hearsay:          deps.Hearsay,
+		logger:           logger.New("repair"),
+		parentCtx:        context.Background(),
+		libraryProbeSlot: make(chan struct{}, 1),
 	}
 }
 

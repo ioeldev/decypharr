@@ -74,6 +74,23 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 		}
 	}
 
+	// A library orphan has no download group in the index. Avoid independent
+	// pack grabs for several broken episodes of the same season. Re-audit other
+	// files after the first recovery completes (including EpisodeSearch fallback).
+	if binding.Confidence == ConfidenceLibraryFile && request.Strategy == StrategySeasonPackFirst {
+		for _, id := range s.activeReacquisitions {
+			active := s.jobs[id]
+			if active.ArrName != binding.ArrName || active.Strategy != StrategySeasonPackFirst {
+				continue
+			}
+			for _, other := range active.Bindings {
+				if other.SeriesID == binding.SeriesID && other.SeasonNumber == binding.SeasonNumber && other.ArrInstanceFingerprint == binding.ArrInstanceFingerprint {
+					s.jobsMu.Unlock()
+					return nil, fmt.Errorf("season already has an active library recovery; retry after it completes")
+				}
+			}
+		}
+	}
 	var bindings []Binding
 	if binding.DownloadID != "" {
 		bindings = s.index.ByDownloadID(binding.ArrName, binding.DownloadID)

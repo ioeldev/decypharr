@@ -499,6 +499,7 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		LibraryAudit      *bool  `json:"library_audit,omitempty"`
 		IgnoreLastChecked bool   `json:"ignore_last_checked,omitempty"`
 		Force             bool   `json:"force,omitempty"`
 		AutoRepair        *bool  `json:"auto_repair,omitempty"`
@@ -562,6 +563,7 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := svc.RunNow(repair.RunOptions{
+		LibraryAudit:      req.LibraryAudit,
 		IgnoreLastChecked: ignoreLastChecked,
 		AutoRepair:        autoRepair,
 		UnrestrictLink:    unrestrictLink,

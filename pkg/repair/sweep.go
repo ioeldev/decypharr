@@ -22,6 +22,10 @@ type fileResult struct {
 }
 
 func (r *Service) executeSweep(ctx context.Context, run *storage.RepairRun, opts RunOptions, stopState *repairStopState) {
+	if opts.LibraryAudit != nil && *opts.LibraryAudit {
+		r.executeLibraryAudit(ctx, run, opts, stopState)
+		return
+	}
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
 
