@@ -48,6 +48,8 @@ func (s *Server) WebRoutes() http.Handler {
 			// Arr management
 			r.Get("/arrs", s.handleGetArrs)
 			r.Post("/add", s.handleAddContent)
+			r.Get("/arr/reacquire/queue", s.handleRepairQueueStatus)
+			r.Post("/arr/reacquire/queue", s.handlePauseRepairQueue)
 			r.Get("/arr/reacquire/jobs", s.handleListArrReacquireJobs)
 			r.Get("/arr/reacquire/jobs/{id}", s.handleGetArrReacquireJob)
 			r.Post("/arr/reacquire/jobs/{id}/acknowledge", s.handleAcknowledgeArrReacquireJob)

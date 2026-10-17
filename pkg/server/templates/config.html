@@ -1755,11 +1755,27 @@ fe80::/10</textarea>
                             </div>
                         </div>
 
+                        <div class="rounded-lg border border-base-300 p-4 space-y-3">
+                            <h4 class="font-medium">Repair queue</h4>
+                            <p class="text-sm opacity-70">Limits new automatic Arr recovery jobs. Pending jobs remain queued until capacity is available; existing downloads and recovery reconciliation continue.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="form-control"><span class="label-text">Minimum interval between jobs</span><input class="input w-full" id="repair.queue_interval" name="repair.queue_interval" placeholder="10s"></label>
+                                <label class="form-control"><span class="label-text">Jobs per batch</span><input class="input w-full" type="number" min="1" id="repair.queue_batch_size" name="repair.queue_batch_size" placeholder="50"></label>
+                                <label class="form-control"><span class="label-text">Pause between batches</span><input class="input w-full" id="repair.queue_batch_pause" name="repair.queue_batch_pause" placeholder="5m"></label>
+                                <label class="form-control"><span class="label-text">Maximum in-flight repair jobs</span><input class="input w-full" type="number" min="1" id="repair.queue_max_active" name="repair.queue_max_active" placeholder="10"></label>
+                            </div>
+                            <label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.queue_paused" name="repair.queue_paused"><span class="label-text">Pause new repair dispatches</span></label>
+                        </div>
+
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <label class="label cursor-pointer justify-start gap-3">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                        id="repair.auto_repair" name="repair.auto_repair">
                                 <span class="label-text font-medium" title="Delete broken files through Arr and trigger a replacement search.">Auto-repair when broken</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.library_audit" name="repair.library_audit">
+                                <span class="label-text font-medium">Audit library reads on scheduled runs (64 KiB per imported file, sequential)</span>
                             </label>
                             <label class="label cursor-pointer justify-start gap-3"
                                    title="Read each media file's head and check for a valid container signature during NZB probes. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed.">

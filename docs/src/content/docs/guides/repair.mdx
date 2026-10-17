@@ -41,6 +41,136 @@ Healthy entries that haven't changed since the last successful check are skipped
 
 You can force a recheck on any one entry from the Browse UI or the API. This works even when the global health checker is disabled and does not produce a run record. Repairs should be triggered through the Arr integration.
 
+## Library read audit
+
+The default checker probes provider APIs for entries managed by Decypharr. A
+library read audit instead enumerates imported files directly from Sonarr and
+Radarr, including files whose original torrent is no longer in Decypharr.
+It opens the library path in Decypharr's container and reads **64 KiB**. Mount the
+same library directories at the same paths used by the Arrs and Plex; absolute
+symlink targets must resolve in Decypharr's container too.
+
+Select **Audit library reads** in the Run modal for a one-off audit. Enable the
+same setting in Configuration to use this mode for scheduled runs
+(`repair.library_audit: true`). It replaces the provider probe for that run.
+The Arr selection, skip-repair flags, recheck interval, ignore-last-checked,
+auto-repair and stop schedule apply. The source and torrent/NZB protocol filters
+do not apply: this mode checks the imported paths regardless of their original
+transport. Counts represent individual library files rather than torrent folders.
+
+Reads run sequentially, with a 30-second deadline and 500 ms between files.
+The mount must be available before probing starts (the built-in DFS mount must
+also expose its `version.txt` marker). An unavailable library parent directory,
+permission error or other inconclusive I/O result is **unknown**, not repairable.
+A timeout stops the audit; no further filesystem worker can start while an older
+read remains blocked, including on subsequent runs.
+
+A missing target, a file smaller than the sample, an incomplete read, or an HTML/XML
+error document becomes **broken** only if confirmed by a
+second probe. Results appear in **View broken** with the library path and owning
+Arr file ID. They use independent `library:` health keys, so a successful provider
+API check cannot overwrite a failed library read. The recheck action repeats the
+filesystem audit, even when the original torrent no longer exists. Results for
+Arr file IDs that disappear after replacement are removed after a successful
+library enumeration. Clear-broken clears audit findings without deleting files
+from the mount.
+
+With auto-repair enabled, or when **Fix broken** is selected:
+
+1. Recheck the mount and library path; skip replacement if it is readable again.
+2. If the symlink maps to an existing torrent, try the original torrent through
+   Decypharr's existing reinsertion mechanism and verify the library read again.
+3. If the path is still confirmed broken, queue the existing durable Arr recovery
+   using the exact file ID and path. Sonarr uses replacement **season pack first**,
+   then **EpisodeSearch** when no eligible pack exists. Radarr searches the owning
+   movie. Files without an indexed torrent use verified Arr-library recovery.
+   Unindexed episodes of the same Sonarr season remain queued and dispatch one
+   at a time. Before dispatch, a queued orphan is checked against the Arr file
+   identities; a replacement imported by an earlier pack recovery satisfies it
+   without another delete/search.
+
+A successful sample establishes only that the beginning is readable now. It can
+come from cache and does not validate the complete movie, decoding, seeking, or
+Plex networking. DFS chunking/read-ahead can download substantially more than
+64 KiB. The audit covers files still declared imported by an Arr; loose symlinks
+with no Sonarr/Radarr file record are outside this mode.
+
+For an initial detection-only run through the API:
+
+```http
+POST /api/repair/run
+Content-Type: application/json
+
+{
+  "library_audit": true,
+  "ignore_last_checked": true,
+  "auto_repair": false
+}
+```
+
+## Repair dispatch queue
+
+**Fix broken** and auto-repair enqueue durable Arr recovery jobs. Completing the
+health-check run means recovery has been requested; it does not mean every media
+file has been replaced. Track actual imports in **Arr Reacquisition**.
+
+New automatic repair jobs share a global dispatch policy across Sonarr and Radarr:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `repair.queue_interval` | `10s` | Minimum time between new repair dispatch slots. |
+| `repair.queue_batch_size` | `50` | Dispatch slots per batch. |
+| `repair.queue_batch_pause` | `5m` | Minimum cooldown after each batch, measured from its last dispatch. `0s` disables the extra cooldown. |
+| `repair.queue_max_active` | `10` | Maximum started, nonterminal repair jobs, including jobs waiting for grab/download/import or needing attention. |
+| `repair.queue_paused` | `false` | Hold new repair jobs in the queue. |
+
+The existing worker runs one Arr operation at a time. Once a job has requested a
+replacement, it continues to occupy an in-flight slot until it completes, fails,
+or is cancelled. Jobs waiting for dispatch do not expire as pending imports.
+Backlogs are kept in the job database and continue automatically when a slot is
+available. A queued orphan already covered by an earlier import can consume a
+dispatch slot for verification, but causes no additional search.
+
+Pause/resume is available in **Arr Reacquisition**, alongside queued/in-flight
+counts and the next dispatch time. It holds new repair dispatches without stopping
+the current audit, existing downloads/imports, or reconciliation of operations
+already started. Explicit manual reacquisitions and stream-triggered recoveries
+are outside this automatic repair throttle. Provider reinsertion attempts and
+read-only checks made while producing jobs are also outside the dispatch limit.
+The limit applies to jobs, not individual HTTP requests or indexers contacted.
+
+Queue settings are editable in Configuration. Empty duration fields and zero
+numeric fields use the defaults. Durations use Go duration syntax, such as `10s`
+or `5m`; the interval must be at least `1ms`, the batch pause may be zero, and both
+are limited to 24 hours. Negative counts are rejected.
+
+The batch counter and next slot are saved atomically in `db/repair_queue.json`
+before a new job can mutate an Arr. A restart or removal of terminal job history
+does not reset the cooldown. A failure to persist a reservation blocks dispatch
+and is shown in the queue status. Preserve the job database and this state file
+when backing up the application.
+
+The authenticated queue API is `GET /api/arr/reacquire/queue`. Pause or resume with
+`POST /api/arr/reacquire/queue`, body `{"paused": true}` or `{"paused": false}`.
+
+### Recovery progress in the UI
+
+The Health Checker distinguishes **Queued** recovery requests from **Restored**
+files confirmed readable immediately. A finished **Fix broken** run shows
+**Submission complete**; recovery can still be running. Older run totals are
+labelled **Recovery requested (legacy)** because the two outcomes were not
+recorded separately.
+
+The **Recovery progress** panel polls while jobs remain outstanding, including
+after submission finishes. It shows queued, working, waiting for grab, downloading,
+waiting for import, imported, needs attention, failed, and cancelled jobs, with a
+link to the detailed Arr Reacquisition table. Imported means Arr confirmed a
+replacement; it is not a new filesystem read test.
+
+These live totals cover all retained repair jobs across runs, not a single scan
+or a count of media files. Clearing or expiring terminal job history changes the
+totals. Unavailable progress is marked stale and retried automatically.
+
 ## Configuration
 
 ```json
@@ -54,6 +184,12 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
     "recheck_interval": "168h",
     "arrs": [],
     "auto_repair": true,
+    "library_audit": false,
+    "queue_interval": "10s",
+    "queue_batch_size": 50,
+    "queue_batch_pause": "5m",
+    "queue_max_active": 10,
+    "queue_paused": false,
     "verify_content": false,
     "notify_on_complete": false,
     "nntp_connection_percent": 20,
@@ -72,6 +208,7 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
 | `recheck_interval`        | How long a healthy entry's check stays fresh before it becomes a candidate again.        | `168h`      |
 | `arrs`                    | Optional filter when `source=arr`. Empty list means all eligible Arrs.                   | `[]`        |
 | `auto_repair`             | When `true`, broken Arr-managed files are deleted through Arr and searched again. When `false`, the sweep is detect-only. | `false` |
+| `library_audit`           | Use sequential library-path sample reads instead of provider entry probes for scheduled runs. | `false` |
 | `verify_content`          | During NZB probes, also read each media file's head through the streaming stack and check for a valid container signature. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed. | `false` |
 | `notify_on_complete`      | Send a notification when a sweep finishes.                                               | `false`     |
 | `nntp_connection_percent` | Percentage of NNTP connections the probe is allowed to use. Avoids starving downloads.   | `20`        |

@@ -53,7 +53,10 @@ type RepairRunStats struct {
 	Healthy      int `json:"healthy"`
 	Broken       int `json:"broken"`
 	Unknown      int `json:"unknown"`
+	// Repaired is retained for API/history compatibility: queued plus restored.
 	Repaired     int `json:"repaired"`
+	Queued       int `json:"queued"`
+	Restored     int `json:"restored"`
 	Cleared      int `json:"cleared,omitempty"`
 	RepairFailed int `json:"repair_failed"`
 }
@@ -217,13 +220,15 @@ type BrokenFile struct {
 
 	// Arr re-acquire payload. Empty when source=managed or when no Arr owns
 	// the file.
-	ArrName    string  `json:"arr_name,omitempty"`
-	ArrKind    ArrKind `json:"arr_kind,omitempty"`
-	MediaID    int     `json:"media_id,omitempty"`
-	EpisodeID  int     `json:"episode_id,omitempty"`
-	ArrFileID  int     `json:"arr_file_id,omitempty"`
-	TargetPath string  `json:"target_path,omitempty"`
-	SourcePath string  `json:"source_path,omitempty"`
+	ArrName        string  `json:"arr_name,omitempty"`
+	ArrKind        ArrKind `json:"arr_kind,omitempty"`
+	MediaID        int     `json:"media_id,omitempty"`
+	EpisodeID      int     `json:"episode_id,omitempty"`
+	ArrFileID      int     `json:"arr_file_id,omitempty"`
+	TargetPath     string  `json:"target_path,omitempty"`
+	SourcePath     string  `json:"source_path,omitempty"`
+	LibraryAudit   bool    `json:"library_audit,omitempty"`
+	ArrFingerprint string  `json:"arr_fingerprint,omitempty"`
 }
 
 // EntryHealth is the source of truth for repair decisions. It is keyed by
@@ -231,7 +236,10 @@ type BrokenFile struct {
 // updated live during a sweep — once when probing starts, once when it
 // finishes.
 type EntryHealth struct {
-	EntryName     string          `json:"entry_name"`
+	EntryName   string `json:"entry_name"`
+	DisplayName string `json:"display_name,omitempty"`
+	// LibraryFile retains identity for rechecks, even after a successful read.
+	LibraryFile   *BrokenFile     `json:"library_file,omitempty"`
 	Protocol      config.Protocol `json:"protocol,omitempty"`
 	Status        HealthStatus    `json:"status"`
 	Fingerprint   string          `json:"fingerprint,omitempty"`

@@ -37,7 +37,7 @@ func (r *Service) collectBrokenHealths(names []string, requireArrFile bool) (*xs
 			}
 			hasArrFile := false
 			for _, bf := range h.BrokenFiles {
-				if bf.ArrName != "" && bf.InfoHash != "" && bf.FileName != "" {
+				if bf.ArrName != "" && ((bf.InfoHash != "" && bf.FileName != "") || (bf.LibraryAudit && bf.ArrFileID > 0 && bf.SourcePath != "")) {
 					hasArrFile = true
 					break
 				}
@@ -238,6 +238,11 @@ func (r *Service) clearBroken(ctx context.Context, run *storage.RepairRun, healt
 
 		remaining := make([]storage.BrokenFile, 0, len(h.BrokenFiles))
 		for _, bf := range h.BrokenFiles {
+			if bf.LibraryAudit {
+				run.Stats.Cleared++
+				r.saveRun(run)
+				continue
+			}
 			if err := r.backend.RemoveTorrentFile(bf.EntryName, bf.FileName); err != nil {
 				if isAlreadyClearedFileError(err) {
 					run.Stats.Cleared++

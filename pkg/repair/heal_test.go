@@ -82,7 +82,7 @@ func TestHealBrokenEntryQueuesStableFileIdentity(t *testing.T) {
 	if request.Cause != reacquire.CauseRepair || request.Strategy != reacquire.StrategyHistoryFailed {
 		t.Fatalf("reacquire request = %#v", request)
 	}
-	if run.Stats.Repaired != 1 || run.Stats.RepairFailed != 0 {
+	if run.Stats.Repaired != 1 || run.Stats.Queued != 1 || run.Stats.Restored != 0 || run.Stats.RepairFailed != 0 {
 		t.Fatalf("repair stats = %#v", run.Stats)
 	}
 	if health.LastRepairAt.IsZero() {
@@ -220,7 +220,7 @@ func TestHealBrokenEntryQueuesUnindexedLibraryFile(t *testing.T) {
 	if len(reacquirer.libraryRequests) != 1 || reacquirer.libraryRequests[0].LibraryPath != "/library/Episode.mkv" || reacquirer.libraryRequests[0].ArrFileID != 4242 {
 		t.Fatalf("library requests = %#v", reacquirer.libraryRequests)
 	}
-	if run.Stats.Repaired != 1 || run.Stats.RepairFailed != 0 {
+	if run.Stats.Repaired != 1 || run.Stats.Queued != 1 || run.Stats.Restored != 0 || run.Stats.RepairFailed != 0 {
 		t.Fatalf("repair stats = %#v", run.Stats)
 	}
 }

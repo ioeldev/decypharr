@@ -38,6 +38,8 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 	}
 
 	initiated := 0
+	queued := 0
+	restoredCount := 0
 	failed := 0
 	for _, broken := range health.BrokenFiles {
 		if ctx != nil && ctx.Err() != nil {
@@ -46,10 +48,29 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 		if broken.ArrName == "" || !r.reacquirable(broken) {
 			continue
 		}
+		if broken.LibraryAudit {
+			restored, err := r.restoreLibraryFile(ctx, broken)
+			if err != nil {
+				failed++
+				r.logger.Warn().Err(err).Str("file", broken.SourcePath).Msg("Library repair deferred")
+				continue
+			}
+			if restored {
+				initiated++
+				restoredCount++
+				health.Status = storage.HealthHealthy
+				health.BrokenCount = 0
+				health.BrokenFiles = nil
+				health.FailureReason = ""
+				health.LastOKAt = time.Now()
+				continue
+			}
+		}
 		job, err := r.reacquireBrokenFile(ctx, broken)
 		switch {
 		case err == nil:
 			initiated++
+			queued++
 			r.logger.Info().
 				Str("arr", broken.ArrName).
 				Str("entry_id", broken.InfoHash).
@@ -73,6 +94,8 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 	r.saveHealth(health)
 	statsMu.Lock()
 	run.Stats.Repaired += initiated
+	run.Stats.Queued += queued
+	run.Stats.Restored += restoredCount
 	run.Stats.RepairFailed += failed
 	r.saveRun(run)
 	statsMu.Unlock()
@@ -99,6 +122,15 @@ func (r *Service) reacquirable(broken storage.BrokenFile) bool {
 func (r *Service) reacquireBrokenFile(ctx context.Context, broken storage.BrokenFile) (*reacquire.Job, error) {
 	if r.reacquirer == nil {
 		return nil, errReacquirerUnavailable
+	}
+	if broken.LibraryAudit {
+		job, err := r.reacquirer.ReacquireLibraryFile(ctx, reacquire.LibraryRequest{
+			ArrName: broken.ArrName, ArrFileID: broken.ArrFileID, LibraryPath: broken.SourcePath, Cause: reacquire.CauseRepair,
+		})
+		if err == nil && (job == nil || job.ID == "") {
+			return nil, errors.New("arr reacquirer returned no job")
+		}
+		return job, err
 	}
 	entryID, fileID, err := r.resolveBrokenFile(broken)
 	var job *reacquire.Job

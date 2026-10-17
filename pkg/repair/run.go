@@ -23,6 +23,9 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 	if !cfg.Enabled && trigger == storage.RepairTriggerScheduled {
 		return "", errors.New("repair disabled")
 	}
+	if opts.LibraryAudit == nil {
+		opts.LibraryAudit = new(cfg.LibraryAudit)
+	}
 	if opts.VerifyContent == nil {
 		opts.VerifyContent = new(cfg.VerifyContent)
 	}
@@ -37,6 +40,9 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 	runCtx, cancel := context.WithCancel(r.parentCtx)
 	stopState := &repairStopState{}
 	sourceParts := []string{string(cfg.Source)}
+	if *opts.LibraryAudit {
+		sourceParts = []string{"library-audit"}
+	}
 	if opts.IgnoreLastChecked {
 		sourceParts = append(sourceParts, "ignore-last-checked")
 	}
@@ -47,13 +53,13 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 			sourceParts = append(sourceParts, "no-auto-repair")
 		}
 	}
-	if opts.UnrestrictLink {
+	if opts.UnrestrictLink && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "unrestrict-link")
 	}
-	if opts.VerifyContent != nil && *opts.VerifyContent {
+	if opts.VerifyContent != nil && *opts.VerifyContent && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "verify-content")
 	}
-	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" {
+	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "protocol-"+scope)
 	}
 	run := &storage.RepairRun{
