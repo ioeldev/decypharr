@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -25,15 +23,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/server/webdav"
 	"github.com/sirrobot01/decypharr/pkg/stats"
 )
-
-//go:embed templates/*
-var content embed.FS
-
-//go:embed assets/build/*
-var assetsEmbed embed.FS
-
-//go:embed assets/images/*
-var imagesEmbed embed.FS
 
 type AddRequest struct {
 	Url        string   `json:"url"`
@@ -63,7 +52,6 @@ type Server struct {
 	manager      *manager.Manager
 	stats        *stats.Collector
 	cookie       *sessions.CookieStore
-	templates    *template.Template
 	nzbUserAgent string
 	urlBase      string
 	restartFunc  func()
@@ -78,7 +66,6 @@ func New(mgr *manager.Manager) *Server {
 
 	cfg := config.Get()
 
-	templates := template.Must(loadTemplates())
 	cookieStore := sessions.NewCookieStore([]byte(cfg.SecretKey()))
 	cookieStore.Options = &sessions.Options{
 		Path:     "/",
@@ -90,12 +77,11 @@ func New(mgr *manager.Manager) *Server {
 	statsCollector := stats.New(mgr)
 
 	s := &Server{
-		logger:    l,
-		manager:   mgr,
-		stats:     statsCollector,
-		cookie:    cookieStore,
-		templates: templates,
-		urlBase:   cfg.URLBase,
+		logger:  l,
+		manager: mgr,
+		stats:   statsCollector,
+		cookie:  cookieStore,
+		urlBase: cfg.URLBase,
 	}
 
 	qb := qbit.New(mgr)
@@ -243,24 +229,4 @@ func (s *Server) getRcloneLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("error stremaing file %s", err), http.StatusInternalServerError)
 		return
 	}
-}
-
-func loadTemplates() (*template.Template, error) {
-	return template.ParseFS(
-		content,
-		"templates/layout.html",
-		"templates/setup_layout.html",
-		"templates/index.html",
-		"templates/download.html",
-		"templates/repair.html",
-		"templates/reacquire.html",
-		"templates/library_repair.html",
-		"templates/repair_tabs.html",
-		"templates/stats.html",
-		"templates/config.html",
-		"templates/browse.html",
-		"templates/login.html",
-		"templates/register.html",
-		"templates/setup.html",
-	)
 }

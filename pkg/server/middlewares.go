@@ -25,7 +25,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				s.sendJSONError(w, "Authentication setup required", http.StatusUnauthorized)
 			} else {
-				http.Redirect(w, r, "/register", http.StatusSeeOther)
+				http.Redirect(w, r, s.webURL("register"), http.StatusSeeOther)
 			}
 			return
 		}
@@ -46,7 +46,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				s.sendJSONError(w, "Authentication required. Please provide a valid API token in the Authorization header (Bearer <token>) or authenticate via session cookies.", http.StatusUnauthorized)
 			} else {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				http.Redirect(w, r, s.webURL("login"), http.StatusSeeOther)
 			}
 			return
 		}
@@ -58,10 +58,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 // isAPIRequest reports whether an authentication failure should be returned as
 // JSON instead of redirecting the caller to the login page.
 func (s *Server) isAPIRequest(r *http.Request) bool {
-	path := r.URL.Path
-	if urlBase := strings.TrimSuffix(s.urlBase, "/"); urlBase != "" {
-		path = strings.TrimPrefix(path, urlBase)
-	}
+	path := s.webRequestPath(r)
 	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/webhooks/")
 }
 
@@ -83,15 +80,19 @@ func (s *Server) setupRedirectMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := config.Get()
 
+		path := s.webRequestPath(r)
+
 		// Skip setup check for setup-related routes
-		if strings.HasPrefix(r.URL.Path, "/setup") ||
-			strings.HasPrefix(r.URL.Path, "/api/setup") ||
-			strings.HasPrefix(r.URL.Path, "/api/login") ||
-			strings.HasPrefix(r.URL.Path, "/api/logout") ||
-			strings.HasPrefix(r.URL.Path, "/api/config") ||
-			strings.HasPrefix(r.URL.Path, "/assets") ||
-			strings.HasPrefix(r.URL.Path, "/images") ||
-			r.URL.Path == "/version" {
+		if strings.HasPrefix(path, "/setup") ||
+			strings.HasPrefix(path, "/api/setup") ||
+			path == "/api/ui" ||
+			strings.HasPrefix(path, "/api/login") ||
+			strings.HasPrefix(path, "/api/logout") ||
+			strings.HasPrefix(path, "/api/config") ||
+			strings.HasPrefix(path, "/assets") ||
+			strings.HasPrefix(path, "/gui-assets/") ||
+			strings.HasPrefix(path, "/images") ||
+			path == "/version" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -102,11 +103,19 @@ func (s *Server) setupRedirectMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				s.sendJSONError(w, fmt.Sprintf("[error] %s Setup wizard must be completed first. Please visit /setup", err), http.StatusServiceUnavailable)
 			} else {
-				http.Redirect(w, r, "/setup", http.StatusSeeOther)
+				http.Redirect(w, r, s.webURL("setup"), http.StatusSeeOther)
 			}
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) webRequestPath(r *http.Request) string {
+	path := r.URL.Path
+	if prefix := strings.TrimSuffix(s.webURL(""), "/"); prefix != "" {
+		path = strings.TrimPrefix(path, prefix)
+	}
+	return path
 }
