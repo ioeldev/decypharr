@@ -458,3 +458,44 @@ func TestLibraryIncidentSurvivesReplacementAndConcurrentPause(t *testing.T) {
 		t.Fatal("manual recheck retained old Arr ID")
 	}
 }
+
+func TestLibraryStateChangeDateIgnoresRepeatedChecks(t *testing.T) {
+	store := newRepairTestStorage(t)
+	service := New(Dependencies{Storage: store})
+	original := time.Now().Add(-time.Hour)
+	h := &storage.EntryHealth{EntryName: "stable-date", Status: storage.HealthBroken, FailureReason: "missing", StatusChangedAt: original, LibraryFile: &storage.BrokenFile{LibraryAudit: true}}
+	if err := store.SaveEntryHealth(h); err != nil {
+		t.Fatal(err)
+	}
+	h.LastCheckedAt = time.Now()
+	service.saveHealth(h)
+	saved, err := store.GetEntryHealth(h.EntryName)
+	if err != nil || !saved.StatusChangedAt.Equal(original) {
+		t.Fatalf("same diagnosis moved date: %+v %v", saved, err)
+	}
+	h.Status = storage.HealthHealthy
+	h.FailureReason = ""
+	service.saveHealth(h)
+	saved, err = store.GetEntryHealth(h.EntryName)
+	if err != nil || !saved.StatusChangedAt.After(original) {
+		t.Fatalf("changed diagnosis retained old date: %+v %v", saved, err)
+	}
+	changed := saved.StatusChangedAt
+	saved.LastCheckedAt = time.Now().Add(time.Hour)
+	service.saveHealth(saved)
+	again, err := store.GetEntryHealth(h.EntryName)
+	if err != nil || !again.StatusChangedAt.Equal(changed) {
+		t.Fatalf("repeated healthy check moved date: %+v %v", again, err)
+	}
+	// Legacy records receive a frozen snapshot date rather than today's recheck time.
+	legacy := &storage.EntryHealth{EntryName: "legacy-date", Status: storage.HealthBroken, LibraryFile: &storage.BrokenFile{LibraryAudit: true}}
+	if err := store.SaveEntryHealth(legacy); err != nil {
+		t.Fatal(err)
+	}
+	baseline := legacy.UpdatedAt
+	service.saveHealth(legacy)
+	saved, err = store.GetEntryHealth(legacy.EntryName)
+	if err != nil || !saved.StatusChangedAt.Equal(baseline) {
+		t.Fatalf("legacy baseline not retained: %+v %v", saved, err)
+	}
+}

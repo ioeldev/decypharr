@@ -7,6 +7,7 @@ class LibraryRepairManager {
         this.page = 1; this.pageSize = 25;
         this.filter = 'all'; this.query = ''; this.expanded = new Set();
         const $ = id => document.getElementById(id);
+        this.initSort($('librarySort'));
         $('libraryRefresh').addEventListener('click', () => this.load());
         $('libraryFilter').addEventListener('change', e => {this.filter=e.target.value;this.page=1;this.render();});
         $('libraryQuery').addEventListener('input', e => {this.query=e.target.value.toLowerCase();this.page=1;this.render();});
@@ -15,6 +16,53 @@ class LibraryRepairManager {
         $('libraryRows').addEventListener('click',e=>{const group=e.target.closest('button[data-group]');if(group){const key=group.dataset.group;if(this.expanded.has(key))this.expanded.delete(key);else this.expanded.add(key);this.render();return;}const b=e.target.closest('button[data-action]');if(b)this.action(b);});
         this.load();
     }
+    sortKey() {return `decypharr.libraryRepair.sort:${window.urlBase||'/'}`;}
+    validSort(value) {return ['changed','checked','name','retry'].includes(value)?value:'changed';}
+    initSort(select) {
+        let saved;
+        try {saved=window.localStorage?.getItem(this.sortKey());} catch(_) {}
+        this.sort=this.validSort(saved);
+        select.value=this.sort;
+        select.addEventListener('change',()=>{
+            this.sort=this.validSort(select.value);this.page=1;
+            try {window.localStorage?.setItem(this.sortKey(),this.sort);} catch(_) {}
+            this.render();
+        });
+    }
+    timestamp(value) {
+        const n=Date.parse(value);
+        return Number.isFinite(n)&&n>0?n:0;
+    }
+    changedAt(row) {
+        const h=row.h,j=row.j;
+        // Observation polling updates updatedAt even when the status is unchanged.
+        return Math.max(this.timestamp(h?.status_changed_at)||Math.max(this.timestamp(h?.last_failed_at),this.timestamp(h?.last_ok_at)),
+            this.timestamp(j?.phaseStartedAt)||this.timestamp(j?.completedAt)||this.timestamp(j?.startedAt)||this.timestamp(j?.createdAt));
+    }
+    sortValue(row) {
+        if(this.sort==='checked')return this.timestamp(row.h?.last_checked_at);
+        if(this.sort==='retry')return row.j?.status==='retry_scheduled'?this.timestamp(row.j.retryAt):0;
+        return this.changedAt(row);
+    }
+    compareNames(a,b) {
+        const name=row=>this.seriesLabel(row);
+        const compare=(x,y)=>String(x??'').localeCompare(String(y??''),undefined,{numeric:true,sensitivity:'base'});
+        return compare(name(a),name(b)) || compare(a.season,b.season) || compare(a.label,b.label)
+            || compare(JSON.stringify([a.f.arr_name,a.f.arr_fingerprint,a.f.media_id,a.h?.entry_name,a.j?.id]),JSON.stringify([b.f.arr_name,b.f.arr_fingerprint,b.f.media_id,b.h?.entry_name,b.j?.id]));
+    }
+    compareDates(a,b) {
+        if(!a||!b)return a?-1:b?1:0;
+        return this.sort==='retry'?a-b:b-a;
+    }
+    sortGroups(groups) {
+        const value=group=>{
+            const dates=group.map(row=>this.sortValue(row)).filter(Boolean);
+            return dates.length?(this.sort==='retry'?Math.min(...dates):Math.max(...dates)):0;
+        };
+        for(const group of groups)group.sort((a,b)=>(this.sort==='name'?0:this.compareDates(this.sortValue(a),this.sortValue(b)))||this.compareNames(a,b));
+        return groups.sort((a,b)=>(this.sort==='name'?0:this.compareDates(value(a),value(b)))||this.compareNames(a[0],b[0]));
+    }
+    formatDate(value) {return value?new Date(value).toLocaleString():'—';}
     async request(url, options={}) {
         const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);
         try {
@@ -110,7 +158,7 @@ class LibraryRepairManager {
             const key=JSON.stringify([row.f.arr_name,row.f.arr_fingerprint,row.f.arr_kind,row.f.media_id,row.f.arr_kind==='sonarr'?row.season:0]);
             if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);
         }
-        const entries=[...groups.values()];const pages=Math.max(1,Math.ceil(entries.length/this.pageSize));this.page=Math.min(this.page,pages);
+        const entries=this.sortGroups([...groups.values()]);const pages=Math.max(1,Math.ceil(entries.length/this.pageSize));this.page=Math.min(this.page,pages);
         this.visible=[];
         const html=entries.slice((this.page-1)*this.pageSize,this.page*this.pageSize).map(group=>{
             let prefix='';
@@ -118,7 +166,7 @@ class LibraryRepairManager {
                 const f=group[0].f;
                 const key=JSON.stringify([f.arr_name,f.arr_fingerprint,f.media_id,group[0].season]);
                 const open=this.expanded?.has(key);
-                prefix=`<tr class="bg-base-200"><td colspan="6"><button class="btn btn-sm btn-ghost" data-group="${this.esc(key)}" aria-expanded="${!!open}">${open?'▾':'▸'} ${this.esc(this.seriesLabel(group[0]))} · Season ${this.esc(group[0].season??'unknown')} · ${group.length} findings</button></td></tr>`;
+                prefix=`<tr class="bg-base-200"><td colspan="7"><button class="btn btn-sm btn-ghost" data-group="${this.esc(key)}" aria-expanded="${!!open}">${open?'▾':'▸'} ${this.esc(this.seriesLabel(group[0]))} · Season ${this.esc(group[0].season??'unknown')} · ${group.length} findings</button></td></tr>`;
                 if(!open)return prefix;
             }
             return prefix+group.map(row=>{
@@ -134,10 +182,10 @@ class LibraryRepairManager {
                 if(j?.status==='needs_attention')actions.push(`<a class="btn btn-xs btn-outline" href="${this.esc(window.urlBase)}repair/reacquire">Review recovery</a>`);
                 const url=`${this.api}/repair/library/media?arr=${encodeURIComponent(f.arr_name)}&media=${encodeURIComponent(f.media_id)}`;
                 actions.push(`<a class="btn btn-xs btn-ghost" href="${this.esc(url)}" target="_blank" rel="noopener noreferrer">${f.arr_kind==='radarr'?'Radarr':'Sonarr'} ↗</a>`);
-                return `<tr><td class="break-all">${this.esc(row.label)}<div class="text-xs opacity-60">${this.esc(f.arr_name)}${h?.library_paused?' · automation suspended':''}</div></td><td>${this.esc(diagnosis)}</td><td>${this.esc(this.recoveryLabel(j))}${j?.status==='ready'&&!row.verified?'<div class="text-xs">Read validation pending</div>':''}${j?.lastError?`<div class="text-xs">${this.esc(j.lastError)}</div>`:''}${j?.observationError?'<div class="text-xs text-warning">Observation unavailable</div>':''}</td><td>${j?.retryCount||0}/${this.data.maxRetries||3}</td><td>${j?.retryAt?this.esc(new Date(j.retryAt).toLocaleString()):'—'}</td><td><div class="flex flex-wrap gap-1">${actions.join('')}</div></td></tr>`;
+                return `<tr><td class="break-all">${this.esc(row.label)}<div class="text-xs opacity-60">${this.esc(f.arr_name)}${h?.library_paused?' · automation suspended':''}</div></td><td>${this.esc(diagnosis)}</td><td>${this.esc(this.recoveryLabel(j))}${j?.status==='ready'&&!row.verified?'<div class="text-xs">Read validation pending</div>':''}${j?.lastError?`<div class="text-xs">${this.esc(j.lastError)}</div>`:''}${j?.observationError?'<div class="text-xs text-warning">Observation unavailable</div>':''}</td><td class="text-xs whitespace-nowrap">${this.esc(this.formatDate(this.changedAt(row)))}</td><td>${j?.retryCount||0}/${this.data.maxRetries||3}</td><td>${j?.retryAt?this.esc(new Date(j.retryAt).toLocaleString()):'—'}</td><td><div class="flex flex-wrap gap-1">${actions.join('')}</div></td></tr>`;
             }).join('');
         }).join('');
-        document.getElementById('libraryRows').innerHTML=html||'<tr><td colspan="6">No findings in this view.</td></tr>';
+        document.getElementById('libraryRows').innerHTML=html||'<tr><td colspan="7">No findings in this view.</td></tr>';
         document.getElementById('libraryPageInfo').textContent=`${rows.length} findings · ${entries.length} media/season groups · Page ${this.page}/${pages}`;
         document.getElementById('libraryPrev').disabled=this.page<=1;document.getElementById('libraryNext').disabled=this.page>=pages;
     }

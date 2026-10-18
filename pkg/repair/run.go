@@ -189,6 +189,17 @@ func (r *Service) saveHealth(state *storage.EntryHealth) {
 	if state.LibraryFile != nil {
 		if old, err := r.storage.GetEntryHealth(state.EntryName); err == nil {
 			state.LibraryPaused = old.LibraryPaused
+			state.StatusChangedAt = old.StatusChangedAt
+			if old.Status != state.Status || old.FailureReason != state.FailureReason || old.LibraryRemoved != state.LibraryRemoved {
+				state.StatusChangedAt = time.Now()
+			} else if state.StatusChangedAt.IsZero() {
+				// Freeze the last known snapshot for legacy findings; a recheck
+				// with the same diagnosis is not a new state change.
+				state.StatusChangedAt = old.UpdatedAt
+			}
+		}
+		if state.StatusChangedAt.IsZero() {
+			state.StatusChangedAt = time.Now()
 		}
 	}
 

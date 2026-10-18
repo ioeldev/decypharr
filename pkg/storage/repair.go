@@ -255,13 +255,14 @@ type EntryHealth struct {
 	Dirty       bool   `json:"dirty"`
 	DirtyReason string `json:"dirty_reason,omitempty"`
 
-	LastCheckedAt  time.Time    `json:"last_checked_at"`
-	LastOKAt       time.Time    `json:"last_ok_at"`
-	LastFailedAt   time.Time    `json:"last_failed_at"`
-	LastRepairAt   time.Time    `json:"last_repair_at"`
-	NextCheckDueAt time.Time    `json:"next_check_due_at"`
-	ActiveRunID    string       `json:"active_run_id,omitempty"`
-	PreviousStatus HealthStatus `json:"previous_status,omitempty"`
+	StatusChangedAt time.Time    `json:"status_changed_at,omitempty"`
+	LastCheckedAt   time.Time    `json:"last_checked_at"`
+	LastOKAt        time.Time    `json:"last_ok_at"`
+	LastFailedAt    time.Time    `json:"last_failed_at"`
+	LastRepairAt    time.Time    `json:"last_repair_at"`
+	NextCheckDueAt  time.Time    `json:"next_check_due_at"`
+	ActiveRunID     string       `json:"active_run_id,omitempty"`
+	PreviousStatus  HealthStatus `json:"previous_status,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }

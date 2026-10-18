@@ -57,6 +57,39 @@ for(const asset of ['js','build/js']) {
   assert.equal(manager.seasonNumber({...unknown.library_file,source_path:'/TV/Example/episode-S00E02.mkv'},null),0);
   assert.equal(manager.seriesLabel({f:flat.library_file,label:'fallback'}),'Example');
  });
+ test(`${asset}: sorting uses meaningful dates, sorts season groups before pagination, and puts missing dates last`,()=>{
+  const {manager,elements}=harness(asset);
+  const file=(series,season,id)=>({arr_name:'shows',arr_fingerprint:'a',arr_kind:'sonarr',media_id:series,season_number:season,episode_id:id,source_path:`/tv/${series===1?'Alpha':'Zulu'}/Season ${season}/episode${id}.mkv`});
+  const row=(series,season,id,changed,checked,retry)=>manager.row({entry_name:`incident-${id}`,status:'broken',library_file:file(series,season,id),status_changed_at:changed,last_checked_at:checked,updated_at:'2099-01-01'},retry?{status:'retry_scheduled',retryAt:retry,phaseStartedAt:changed,updatedAt:'2099-01-01'}:null,file(series,season,id));
+  const old=row(1,1,1,'2026-01-01','2026-04-01','2026-07-01');
+  const newest=row(1,1,2,'2026-03-01','2026-02-01','2026-05-01');
+  const middle=row(2,2,3,'2026-02-01','2026-03-01','2026-06-01');
+  const missing=row(1,3,4,undefined,undefined,undefined);
+  const groups=()=>[[old,newest],[middle],[missing]];
+  const ids=groups=>Array.from(groups,g=>g[0].f.episode_id);
+  assert.deepEqual(ids(manager.sortGroups(groups())),[2,3,4]);
+  assert.equal(manager.changedAt(newest),Date.parse('2026-03-01'));
+  manager.sort='checked';assert.deepEqual(ids(manager.sortGroups(groups())),[1,3,4]);
+  manager.sort='retry';assert.deepEqual(ids(manager.sortGroups(groups())),[2,3,4]);
+  manager.sort='name';assert.deepEqual(ids(manager.sortGroups(groups())),[1,4,3]);
+  manager.sort='changed';manager.pageSize=1;manager.rows=()=>[old,newest,middle,missing];manager.render();
+  assert.match(elements.get('libraryRows').innerHTML,/Alpha · Season 1 · 2 findings/);
+  manager.page=2;manager.render();assert.match(elements.get('libraryRows').innerHTML,/Zulu · Season 2/);
+  const before=manager.changedAt(newest);newest.j.updatedAt='2100-01-01';newest.h.updated_at='2100-01-01';
+  assert.equal(manager.changedAt(newest),before);
+  newest.j.phaseStartedAt='2026-08-01';assert.equal(manager.changedAt(newest),Date.parse('2026-08-01'));
+ });
+ test(`${asset}: sort preference survives reload, validates saved values and tolerates unavailable storage`,()=>{
+  const {manager,context}=harness(asset);const values=new Map();let listener;
+  context.window.localStorage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
+  const select={value:'',addEventListener:(name,fn)=>{listener=fn;}};
+  manager.render=()=>{};manager.initSort(select);assert.equal(select.value,'changed');
+  manager.page=8;select.value='retry';listener();assert.equal(manager.page,1);assert.equal(manager.sort,'retry');
+  manager.sort='changed';manager.initSort(select);assert.equal(select.value,'retry');
+  values.set(manager.sortKey(),'invalid');manager.initSort(select);assert.equal(select.value,'changed');
+  context.window.localStorage={getItem(){throw new Error('blocked');},setItem(){throw new Error('quota');}};
+  manager.initSort(select);assert.equal(select.value,'changed');select.value='name';listener();assert.equal(manager.sort,'name');
+ });
  test(`${asset}: a hanging response body is aborted and polling recovers`,async()=>{
   const {manager,context,elements,timers}=harness(asset);
   context.fetch=async(url,{signal})=>({ok:true,json:()=>new Promise((resolve,reject)=>{if(signal.aborted)reject(new Error('timeout'));else signal.addEventListener('abort',()=>reject(new Error('timeout')));})});
