@@ -183,6 +183,9 @@ func (d *Downloader) markAsError(entry *storage.Entry, err error) {
 // processSymlink creates symlinks for torrent files
 func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) error {
 	files := entry.GetActiveFiles()
+	if len(files) == 0 {
+		return fmt.Errorf("cannot prepare symlink import: provider returned no active files; download is not ready for Arr import")
+	}
 	torrentSymlinkPath := entry.DownloadPath()
 	d.logger.Info().Str("mount_path", mountPath).Msgf("Creating symlinks for %d files in %s", len(files), torrentSymlinkPath)
 

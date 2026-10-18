@@ -15,6 +15,7 @@ import (
 )
 
 func (m *Manager) restoreActiveDownloadJobs() {
+	m.restoreEmptyCompletedImports()
 	entries, err := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", false)
 	if err != nil {
 		m.logger.Error().Err(err).Msg("Failed to restore the download queue")
@@ -170,4 +171,34 @@ func downloadFolderForEntry(fallback string, entry *storage.Entry) string {
 		return filepath.Dir(entry.SavePath)
 	}
 	return fallback
+}
+
+// Recover the precise legacy failure: completed symlink imports with no file
+// metadata at all. Resume their existing provider placement, never resubmit the
+// magnet or revive intentionally deleted files, normal imports, or season parents.
+func (m *Manager) restoreEmptyCompletedImports() {
+	entries, err := m.queue.ListFilter("", config.ProtocolTorrent, storage.EntryStatePausedUP, nil, "", false)
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to inspect empty completed imports")
+		return
+	}
+	for _, entry := range entries {
+		if m.ctx.Err() != nil {
+			return
+		}
+		if !entry.IsComplete || entry.Action != config.DownloadActionSymlink || len(entry.Files) != 0 || entry.Category == "" || entry.SavePath == "" || entry.GetActiveProvider() == nil {
+			continue
+		}
+		entry.State = storage.EntryStateDownloading
+		entry.Status = debridTypes.TorrentStatusDownloading
+		entry.IsComplete = false
+		entry.IsDownloading = false
+		entry.Progress = 0
+		entry.CompletedAt = nil
+		if err := m.queue.Update(entry); err != nil {
+			m.logger.Error().Err(err).Str("entry_id", entry.InfoHash).Msg("Failed to restore empty symlink import")
+			continue
+		}
+		m.logger.Info().Str("entry_id", entry.InfoHash).Msg("Resuming empty symlink import from existing provider metadata")
+	}
 }
