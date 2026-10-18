@@ -1,9 +1,11 @@
 import { objectValue, stringValue, numberValue, type JsonObject } from '../../../../shared/api/json-response';
-import { useAction } from '../../../../shared/hooks/use-action';
+import { useMutation } from '@tanstack/react-query';
 import ActionMessage from '../../../../shared/components/action-message';
 
 export default function AccessInstructions({ access }: { access: JsonObject }) {
-  const action = useAction();
+  const action = useMutation({
+    mutationFn: (operation: () => Promise<string>) => operation(),
+  });
   const webdav = objectValue(access.webdav);
   const nfs = objectValue(access.nfs);
   const smb = objectValue(access.smb);
@@ -28,11 +30,11 @@ export default function AccessInstructions({ access }: { access: JsonObject }) {
   return <div className="space-y-3">
     {commands.map((command) => <div key={command.label}><p>{command.label}</p><div className="flex gap-3 items-center">
       <code className="block p-3 bg-base-200 flex-1 break-all">{command.value}</code>
-      <button className="btn btn-xs" onClick={() => action.run(async () => { await navigator.clipboard.writeText(command.value); return `${command.label} copied.`; })}>Copy</button>
+      <button className="btn btn-xs" onClick={() => action.mutate(async () => { await navigator.clipboard.writeText(command.value); return `${command.label} copied.`; })}>Copy</button>
     </div></div>)}
     {webdav.enabled ? <p>{webdav.auth_required ? 'WebDAV requires your Decypharr username and password.' : 'WebDAV does not require authentication.'}</p> : null}
     {nfs.enabled ? <p>Create the mount directory first. Behind Docker or NAT, use the mapped host port.</p> : null}
     {smb.enabled ? <p>SMB is read-only, signed but not encrypted. Windows requires host port 445 mapped to {smbPort}.</p> : null}
-    <ActionMessage state={action.state} />
+    <ActionMessage state={action} />
   </div>;
 }

@@ -1,11 +1,14 @@
+import { statisticsKeys } from '../../../statistics/statistics.queries';
+import { queuesKeys } from '../../../queues/queues.queries';
+import { libraryKeys, browseQuery } from '../../library.queries';
+import { repairKeys } from '../../../repair/repair.queries';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { request } from '../../../../shared/api/client';
-import { useApiResource } from '../../../../shared/hooks/use-api-resource';
-import { useAction } from '../../../../shared/hooks/use-action';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ActionMessage from '../../../../shared/components/action-message';
 import Pagination from '../../../../shared/components/pagination';
-import { browseSchema, downloadUrl, type BrowseEntry } from '../../library.api';
+import { downloadUrl, type BrowseEntry } from '../../library.api';
 import EntryHealth from './components/entry-health';
 
 export default function BrowsePage() {
@@ -16,8 +19,17 @@ export default function BrowsePage() {
   const query = new URLSearchParams(parameters);
   query.delete('path');
   const directory = path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  const listing = useApiResource({ path: `api/browse/${directory}?${query}`, parse: browseSchema.parse });
-  const action = useAction();
+  const listing = useQuery(browseQuery(directory, query.toString()));
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: (operation: () => Promise<string>) => operation(),
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+      queryClient.invalidateQueries({ queryKey: queuesKeys.all }),
+      queryClient.invalidateQueries({ queryKey: repairKeys.all }),
+      queryClient.invalidateQueries({ queryKey: statisticsKeys.all }),
+    ]),
+  });
 
   function changeParameter(name: string, value: string): void {
     const next = new URLSearchParams(parameters);
@@ -31,10 +43,9 @@ export default function BrowsePage() {
     if (ids.length === 0) return;
     if (!confirm(`Permanently delete ${ids.length} original item(s) from every library, virtual folder, and provider?`)) return;
 
-    action.run(async () => {
+    action.mutate(async () => {
       await request('api/browse/torrents/batch', { method: 'DELETE', json: { ids } });
       setSelected(new Map());
-      listing.reload();
       return 'Items deleted.';
     });
   }
@@ -48,7 +59,7 @@ export default function BrowsePage() {
       </li>)}
     </ul></nav>
     <div className="flex gap-3">
-      <button className="btn btn-sm" onClick={() => listing.reload()}>Refresh</button>
+      <button className="btn btn-sm" onClick={() => void listing.refetch()}>Refresh</button>
       <input className="input input-sm" aria-label="Search files" placeholder="Search" value={parameters.get('search') ?? ''} onChange={(event) => changeParameter('search', event.target.value)} />
       <select className="select select-sm" aria-label="Page size" value={parameters.get('limit') ?? '20'} onChange={(event) => changeParameter('limit', event.target.value)}>
         {[20, 50, 100].map((limit) => <option key={limit}>{limit}</option>)}
@@ -64,19 +75,19 @@ export default function BrowsePage() {
       <button className="btn btn-error btn-sm" disabled={action.isPending} onClick={() => deleteEntries([...selected.values()])}>Delete Selected</button>
       <button className="btn btn-sm" onClick={() => setSelected(new Map())}>Clear Selection</button>
     </div> : null}
-    <ActionMessage state={action.state} />
-    {listing.state.kind === 'loading' ? <p role="status">Loading directory…</p> : null}
-    {listing.state.kind === 'error' ? <p role="alert">{listing.state.message}</p> : null}
-    {listing.state.kind === 'ready' ? <>
-      {listing.state.value.current_kind === 'virtual' ? <p className="alert">This is a virtual folder. Deleting an item removes the original from all views. <Link to="/settings?tab=virtual_folders">Edit virtual folders</Link></p> : null}
-      {listing.state.value.entries.length === 0 ? <p>No files or folders found here.</p> : <div className="overflow-x-auto bg-base-100 rounded-box">
+    <ActionMessage state={action} />
+    {listing.isPending ? <p role="status">Loading directory…</p> : null}
+    {(listing.isError && !listing.data) ? <p role="alert">{listing.error.message}</p> : null}
+    {listing.data !== undefined ? <>
+      {listing.data.current_kind === 'virtual' ? <p className="alert">This is a virtual folder. Deleting an item removes the original from all views. <Link to="/settings?tab=virtual_folders">Edit virtual folders</Link></p> : null}
+      {listing.data.entries.length === 0 ? <p>No files or folders found here.</p> : <div className="overflow-x-auto bg-base-100 rounded-box">
         <table className="table"><thead><tr>
-          <th><input type="checkbox" className="checkbox" aria-label="Select all visible entries" checked={listing.state.value.entries.length > 0 && listing.state.value.entries.every((entry) => selected.has(entry.path))} onChange={(event) => {
-            if (listing.state.kind !== 'ready') return;
-            setSelected(event.target.checked ? new Map(listing.state.value.entries.map((entry) => [entry.path, entry])) : new Map());
+          <th><input type="checkbox" className="checkbox" aria-label="Select all visible entries" checked={listing.data.entries.length > 0 && listing.data.entries.every((entry) => selected.has(entry.path))} onChange={(event) => {
+            if (listing.data === undefined) return;
+            setSelected(event.target.checked ? new Map(listing.data.entries.map((entry) => [entry.path, entry])) : new Map());
           }} /></th>
           <th>Name</th><th>Size</th><th>Modified</th><th>Provider</th><th>Health</th><th>Actions</th>
-        </tr></thead><tbody>{listing.state.value.entries.map((entry) => <tr key={entry.path}>
+        </tr></thead><tbody>{listing.data.entries.map((entry) => <tr key={entry.path}>
           <td><input type="checkbox" className="checkbox" aria-label={`Select ${entry.name}`} checked={selected.has(entry.path)} onChange={(event) => {
             const next = new Map(selected);
             if (event.target.checked) next.set(entry.path, entry);
@@ -89,8 +100,8 @@ export default function BrowsePage() {
           <td>{entry.can_delete ? <button className="btn btn-xs btn-error" disabled={action.isPending} onClick={() => deleteEntries([entry])}>Delete</button> : null}</td>
         </tr>)}</tbody></table>
       </div>}
-      <p>{listing.state.value.total} entries</p>
-      <Pagination page={page} totalPages={listing.state.value.total_pages} onChange={(next) => changeParameter('page', String(next))} />
+      <p>{listing.data.total} entries</p>
+      <Pagination page={page} totalPages={listing.data.total_pages} onChange={(next) => changeParameter('page', String(next))} />
     </> : null}
   </section>;
 }

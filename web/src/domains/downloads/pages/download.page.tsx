@@ -1,30 +1,40 @@
+import { statisticsKeys } from '../../statistics/statistics.queries';
+import { queuesKeys } from '../../queues/queues.queries';
+import { libraryKeys } from '../../library/library.queries';
+import { configurationQuery } from '../../settings/settings.queries';
 import { readPreference, savePreference } from '../../../shared/browser/preferences';
-import { useApiResource } from '../../../shared/hooks/use-api-resource';
-import { useAction } from '../../../shared/hooks/use-action';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ActionMessage from '../../../shared/components/action-message';
 import FormField from '../../../shared/components/form-field';
 import { addDownloads, downloadConfigSchema } from '../downloads.api';
 
 export default function DownloadPage() {
-  const config = useApiResource({ path: 'api/config', parse: downloadConfigSchema.parse });
-  const action = useAction();
+  const config = useQuery({ ...configurationQuery(), select: downloadConfigSchema.parse });
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: addDownloads,
+    onSuccess: (_message, form) => {
+      for (const name of ['urls', 'nzbURLs', 'files', 'nzbFiles']) {
+        const input = form.elements.namedItem(name);
+        if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = '';
+      }
+    },
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queuesKeys.all }),
+      queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+      queryClient.invalidateQueries({ queryKey: statisticsKeys.all }),
+    ]),
+  });
 
-  if (config.state.kind === 'loading') return <p>Loading download settings…</p>;
-  if (config.state.kind === 'error') return <p role="alert">{config.state.message}</p>;
+  if (config.isPending) return <p>Loading download settings…</p>;
+  if (config.isError && !config.data) return <p role="alert">{config.error.message}</p>;
 
-  const settings = config.state.value;
+  const settings = config.data;
   return <section className="card bg-base-100 p-6 space-y-6">
     <h1 className="text-2xl font-bold">Add Downloads</h1>
     <form className="space-y-6" onSubmit={(event) => {
       event.preventDefault();
-      const form = event.currentTarget;
-      action.run(() => addDownloads(form).then((message) => {
-        for (const name of ['urls', 'nzbURLs', 'files', 'nzbFiles']) {
-          const input = form.elements.namedItem(name);
-          if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = '';
-        }
-        return message;
-      }));
+      action.mutate(event.currentTarget);
     }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
       event.preventDefault();
       for (const [name, extension] of [['files', '.torrent'], ['nzbFiles', '.nzb']]) {
@@ -56,6 +66,6 @@ export default function DownloadPage() {
       </div>
       <button className="btn btn-primary" disabled={action.isPending}>Add to Download Queue</button>
     </form>
-    <ActionMessage state={action.state} />
+    <ActionMessage state={action} />
   </section>;
 }

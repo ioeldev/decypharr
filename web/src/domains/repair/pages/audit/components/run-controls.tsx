@@ -1,23 +1,26 @@
+import { repairKeys, repairConfigQuery } from '../../../repair.queries';
 import { request } from '../../../../../shared/api/client';
-import { jsonObjectSchema } from '../../../../../shared/api/json-response';
-import { useApiResource } from '../../../../../shared/hooks/use-api-resource';
-import { useAction } from '../../../../../shared/hooks/use-action';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import FormField from '../../../../../shared/components/form-field';
 import ActionMessage from '../../../../../shared/components/action-message';
 
 export default function RunControls() {
-  const config = useApiResource({ path: 'api/repair/config', parse: jsonObjectSchema.parse });
-  const action = useAction();
-  if (config.state.kind === 'loading') return <p>Loading repair configuration…</p>;
-  if (config.state.kind === 'error') return <p role="alert">{config.state.message}</p>;
+  const config = useQuery(repairConfigQuery());
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: (operation: () => Promise<string>) => operation(),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: repairKeys.all }),
+  });
+  if (config.isPending) return <p>Loading repair configuration…</p>;
+  if (config.isError && !config.data) return <p role="alert">{config.error.message}</p>;
 
-  const settings = config.state.value;
+  const settings = config.data;
   return <section className="card bg-base-100 p-5 space-y-4">
     <h2 className="text-xl">Run a health check</h2>
     <form className="space-y-3" onSubmit={(event) => {
       event.preventDefault();
       const fields = new FormData(event.currentTarget);
-      action.run(async () => {
+      action.mutate(async () => {
         await request('api/repair/run', { method: 'POST', json: {
           library_audit: fields.has('library_audit'), ignore_last_checked: fields.has('ignore_last_checked'),
           auto_repair: fields.has('auto_repair'), unrestrict_link: true,
@@ -36,12 +39,12 @@ export default function RunControls() {
       <button className="btn btn-primary" disabled={action.isPending}>Run Now</button>
     </form>
     <div className="flex gap-3">
-      <button className="btn" disabled={action.isPending} onClick={() => action.run(async () => { await request('api/repair/stop', { method: 'POST' }); return 'Stop requested.'; })}>Stop Run</button>
+      <button className="btn" disabled={action.isPending} onClick={() => action.mutate(async () => { await request('api/repair/stop', { method: 'POST' }); return 'Stop requested.'; })}>Stop Run</button>
       <button className="btn btn-warning" disabled={action.isPending} onClick={() => {
         if (!confirm('Send delete and re-search requests for all broken entries to their Arr?')) return;
-        action.run(async () => { await request('api/repair/fix', { method: 'POST', json: {} }); return 'Recovery submission started.'; });
+        action.mutate(async () => { await request('api/repair/fix', { method: 'POST', json: {} }); return 'Recovery submission started.'; });
       }}>Fix Broken Entries</button>
     </div>
-    <ActionMessage state={action.state} />
+    <ActionMessage state={action} />
   </section>;
 }

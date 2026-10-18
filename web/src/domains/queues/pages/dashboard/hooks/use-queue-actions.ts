@@ -1,45 +1,44 @@
-import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queuesKeys } from '../../../queues.queries';
+import { libraryKeys } from '../../../../library/library.queries';
+import { statisticsKeys } from '../../../../statistics/statistics.queries';
 import { deleteQueueEntries } from '../../../queues.api';
 
-type ActionState =
-  | { kind: 'idle' }
-  | { kind: 'pending' }
-  | { kind: 'success'; message: string }
-  | { kind: 'error'; message: string };
+type QueueAction = { kind: 'delete'; hashes: string[]; removeFromProvider: boolean } | { kind: 'copy'; text: string };
 
 export function useQueueActions(onDeleted: (hashes: string[]) => void) {
-  const [state, setState] = useState<ActionState>({ kind: 'idle' });
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: async (operation: QueueAction): Promise<string> => {
+      if (operation.kind === 'copy') {
+        if (!navigator.clipboard) throw new Error('Clipboard access requires HTTPS or localhost.');
+        await navigator.clipboard.writeText(operation.text);
+        return 'Copied to clipboard.';
+      }
+
+      await deleteQueueEntries(operation);
+      return `Deleted ${operation.hashes.length} item(s).`;
+    },
+    onSuccess: (_message, operation) => {
+      if (operation.kind === 'delete') onDeleted(operation.hashes);
+    },
+    onSettled: async (_message, _error, operation) => {
+      if (operation.kind !== 'delete') return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queuesKeys.all }),
+        queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: statisticsKeys.all }),
+      ]);
+    },
+  });
 
   function deleteEntries(hashes: string[], removeFromProvider: boolean): void {
-    if (hashes.length === 0 || state.kind === 'pending') return;
+    if (hashes.length === 0 || action.isPending) return;
+    const verb = removeFromProvider ? 'Remove from provider and delete' : 'Delete';
+    if (!window.confirm(`${verb} ${hashes.length} selected item(s)?`)) return;
 
-    const action = removeFromProvider ? 'Remove from provider and delete' : 'Delete';
-    if (!window.confirm(`${action} ${hashes.length} selected item(s)?`)) return;
-
-    setState({ kind: 'pending' });
-    deleteQueueEntries({ hashes, removeFromProvider })
-      .then(() => {
-        setState({ kind: 'success', message: `Deleted ${hashes.length} item(s).` });
-        onDeleted(hashes);
-      })
-      .catch((error: unknown) => {
-        setState({ kind: 'error', message: error instanceof Error ? error.message : 'Unable to delete entries.' });
-      });
+    action.mutate({ kind: 'delete', hashes, removeFromProvider });
   }
 
-  function copyText(text: string): void {
-    if (state.kind === 'pending') return;
-
-    if (!navigator.clipboard) {
-      setState({ kind: 'error', message: 'Clipboard access requires HTTPS or localhost.' });
-      return;
-    }
-
-    setState({ kind: 'pending' });
-    navigator.clipboard.writeText(text)
-      .then(() => setState({ kind: 'success', message: 'Copied to clipboard.' }))
-      .catch(() => setState({ kind: 'error', message: 'Unable to copy to the clipboard.' }));
-  }
-
-  return { state, deleteEntries, copyText };
+  return { action, deleteEntries, copyText: (text: string) => action.mutate({ kind: 'copy', text }) };
 }

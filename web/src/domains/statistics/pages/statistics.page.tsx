@@ -1,18 +1,20 @@
-import { arrayValue, jsonObjectSchema, objectValue, stringValue } from '../../../shared/api/json-response';
-import { useApiResource } from '../../../shared/hooks/use-api-resource';
+import { statisticsQuery } from '../statistics.queries';
+import { arrayValue, objectValue, stringValue } from '../../../shared/api/json-response';
+import { useQuery } from '@tanstack/react-query';
 import RecordDetails from '../../../shared/components/record-details';
 import ProviderSpeedTest from './components/provider-speed-test';
 import CacheActions from './components/cache-actions';
 import AccessInstructions from './components/access-instructions';
 
 export default function StatisticsPage() {
-  const stats = useApiResource({ path: 'debug/stats', parse: jsonObjectSchema.parse, pollIntervalMs: 30000 });
-  if (stats.state.kind === 'loading') return <p>Loading statistics…</p>;
-  if (stats.state.kind === 'error') return <section><p role="alert">{stats.state.message}</p><button className="btn" onClick={() => stats.reload()}>Retry</button></section>;
+  const stats = useQuery(statisticsQuery());
+  if (stats.isPending) return <p>Loading statistics…</p>;
+  if (stats.isError && !stats.data) return <section><p role="alert">{stats.error.message}</p><button className="btn" onClick={() => void stats.refetch()}>Retry</button></section>;
 
-  const snapshot = stats.state.value;
+  const snapshot = stats.data;
   return <div className="space-y-5">
-    <div className="flex justify-between"><h1 className="text-2xl font-bold">Statistics</h1><button className="btn btn-sm" onClick={() => stats.reload()}>Refresh</button></div>
+    {stats.isError ? <p role="alert">{stats.error.message} Showing the last received data.</p> : null}
+    <div className="flex justify-between"><h1 className="text-2xl font-bold">Statistics</h1><button className="btn btn-sm" onClick={() => void stats.refetch()}>Refresh</button></div>
     {Object.entries(snapshot).map(([name, value]) => <section className="card bg-base-100 p-5 space-y-4" key={name}>
       <h2 className="text-xl capitalize">{name.replaceAll('_', ' ')}</h2>
       <RecordDetails value={value} />

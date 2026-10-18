@@ -1,8 +1,12 @@
+import { statisticsKeys } from '../../../statistics/statistics.queries';
+import { configurationQuery, settingsKeys } from '../../settings.queries';
+import { libraryKeys } from '../../../library/library.queries';
+import { repairKeys } from '../../../repair/repair.queries';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { request, requestJson } from '../../../../shared/api/client';
 import { arrayValue, jsonObjectSchema, objectValue, type JsonObject } from '../../../../shared/api/json-response';
-import { useAction } from '../../../../shared/hooks/use-action';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import ActionMessage from '../../../../shared/components/action-message';
 import { settingsFields } from '../../settings.fields';
 import SettingsObject from './settings-object';
@@ -13,11 +17,20 @@ import VirtualFolderPreview from './virtual-folder-preview';
 const sectionNames = ['debrids', 'arrs', 'usenet', 'mount', 'nfs', 'smb', 'share_cache', 'repair', 'virtual_folders', 'strm', 'hearsay', 'notifications', 'queue_cleanup'];
 
 export default function SettingsEditor({ initial }: { initial: JsonObject }) {
-  const [savedConfiguration, setSavedConfiguration] = useState(initial);
-  const [configuration, setConfiguration] = useState(initial);
+  const [draft, setDraft] = useState<JsonObject | null>(null);
+  const configuration = draft ?? initial;
   const [parameters, setParameters] = useSearchParams();
   const tab = parameters.get('tab') ?? 'general';
-  const action = useAction();
+  const queryClient = useQueryClient();
+  const action = useMutation({
+    mutationFn: (operation: () => Promise<string>) => operation(),
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: settingsKeys.all }),
+      queryClient.invalidateQueries({ queryKey: repairKeys.all }),
+      queryClient.invalidateQueries({ queryKey: statisticsKeys.all }),
+      queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+    ]),
+  });
   const sections = settingsFields.filter((field) => sectionNames.includes(field.name));
   const current = sections.find((field) => field.name === tab);
 
@@ -27,7 +40,8 @@ export default function SettingsEditor({ initial }: { initial: JsonObject }) {
     return requestJson('api/config', { method: 'POST', json: editable })
       .then(jsonObjectSchema.parse)
       .then((response) => {
-        setSavedConfiguration(configuration);
+        queryClient.setQueryData(configurationQuery().queryKey, configuration);
+        setDraft((current) => current === configuration ? null : current);
         return response.restarted ? 'Configuration saved. Services are restarting; refresh once the server is ready.' : 'Configuration saved.';
       });
   }
@@ -37,13 +51,13 @@ export default function SettingsEditor({ initial }: { initial: JsonObject }) {
     <nav className="tabs tabs-border" aria-label="Settings sections">
       {[{ name: 'general', label: 'General' }, ...sections, { name: 'authentication', label: 'Authentication' }].map((section) => <button className={`tab ${tab === section.name ? 'tab-active' : ''}`} key={section.name} onClick={() => setParameters({ tab: section.name })}>{section.label}</button>)}
     </nav>
-    {tab === 'authentication' ? <AuthenticationSettings initial={configuration} /> : <form className="card bg-base-100 p-6 space-y-5" onSubmit={(event) => { event.preventDefault(); action.run(saveConfiguration); }}>
-      {current ? <SettingsField field={current} value={configuration[current.name]} onChange={(value) => setConfiguration({ ...configuration, [current.name]: value })} />
-        : <SettingsObject fields={settingsFields.filter((field) => !sectionNames.includes(field.name))} value={configuration} onChange={setConfiguration} />}
+    {tab === 'authentication' ? <AuthenticationSettings initial={configuration} /> : <form className="card bg-base-100 p-6 space-y-5" onSubmit={(event) => { event.preventDefault(); action.mutate(saveConfiguration); }}>
+      {current ? <SettingsField field={current} value={configuration[current.name]} onChange={(value) => setDraft({ ...configuration, [current.name]: value })} />
+        : <SettingsObject fields={settingsFields.filter((field) => !sectionNames.includes(field.name))} value={configuration} onChange={setDraft} />}
       {tab === 'virtual_folders' ? arrayValue(configuration.virtual_folders).map((folder, index) => <VirtualFolderPreview key={index} folder={objectValue(folder)} />) : null}
-      {tab === 'strm' ? <button type="button" className="btn btn-outline" disabled={action.isPending} onClick={() => action.run(async () => { await request('api/strm/regenerate', { method: 'POST' }); return 'STRM regeneration started in the background.'; })}>Regenerate STRM Files</button> : null}
-      <div className="flex gap-3"><button className="btn btn-primary" disabled={action.isPending}>Save Configuration</button><button type="button" className="btn" onClick={() => { if (confirm('Discard unsaved changes?')) setConfiguration(savedConfiguration); }}>Reset Changes</button></div>
+      {tab === 'strm' ? <button type="button" className="btn btn-outline" disabled={action.isPending} onClick={() => action.mutate(async () => { await request('api/strm/regenerate', { method: 'POST' }); return 'STRM regeneration started in the background.'; })}>Regenerate STRM Files</button> : null}
+      <div className="flex gap-3"><button className="btn btn-primary" disabled={action.isPending}>Save Configuration</button><button type="button" className="btn" onClick={() => { if (confirm('Discard unsaved changes?')) setDraft(null); }}>Reset Changes</button></div>
     </form>}
-    <ActionMessage state={action.state} />
+    <ActionMessage state={action} />
   </section>;
 }

@@ -15,7 +15,7 @@ try {
   const mutations = [];
   const configuration = { download_folder: '/downloads', debrids: [{ name: 'realdebrid', api_key: 'test-key', download_api_keys: [] }], arrs: [], use_auth: false, mount: { type: 'dfs' }, repair: { enabled: true }, usenet: { providers: [] }, virtual_folders: [], api_token: 'test-token' };
   const fixtures = {
-    '/version': { version: 'test', latest_version: 'test' },
+    '/version': { version: 'test', channel: 'dev' },
     '/api/torrents': { torrents: [], categories: [], total: 0, total_pages: 1 },
     '/api/config': configuration,
     '/api/browse/': { entries: [], total: 0, total_pages: 1 },
@@ -31,6 +31,11 @@ try {
     '/debug/stats': { memory: { alloc: 123 }, mount: { type: 'dfs' }, debrids: [], usenet: { providers: [] }, access: { webdav: { enabled: true, path: '/webdav' } } },
   };
   for (const prefix of ['', '/base']) {
+    fixtures['/api/arr/reacquire/jobs'][0].status = 'needs_attention';
+    fixtures['/api/arr/reacquire/queue'].queued = 3;
+    configuration.download_folder = '/downloads';
+    let delayConfiguration = false;
+    let releaseConfiguration;
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(5000);
     page.on('pageerror', error => errors.push(error.message));
@@ -44,9 +49,18 @@ try {
       assert.ok(url.pathname.startsWith(`${prefix}/`), 'API prefix');
       if (request.method() !== 'GET') {
         mutations.push({ path, body: request.postData(), method: request.method() });
+        if (path === '/api/config') Object.assign(configuration, request.postDataJSON());
+        if (path === '/api/arr/reacquire/jobs/job/retry') {
+          fixtures['/api/arr/reacquire/jobs'][0].status = 'queued';
+          fixtures['/api/arr/reacquire/queue'].queued = 4;
+        }
         return route.fulfill({ json: path === '/api/add' ? [{ status: 'success' }] : { success: true, message: 'Saved' } });
       }
       if (path === '/api/ui') return route.fulfill({ json: session });
+      if (path === '/api/config' && delayConfiguration) {
+        delayConfiguration = false;
+        await new Promise(resolve => { releaseConfiguration = resolve; });
+      }
       assert.ok(path in fixtures, `Unmocked endpoint ${path}`);
       return route.fulfill({ json: fixtures[path] });
     });
@@ -56,7 +70,12 @@ try {
       await page.waitForTimeout(150);
       assert.equal(await page.getByRole('alert').count(), 0, `${path}: ${await page.getByRole('alert').allTextContents()}`);
       if (path === '/repair') await page.locator('summary').filter({ hasText: 'Submission complete' }).waitFor();
-      if (path === '/repair/reacquire') await page.getByRole('link', { name: 'Canonical Show · S02E03' }).waitFor();
+      if (path === '/repair/reacquire') {
+        await page.getByRole('link', { name: 'Canonical Show · S02E03' }).waitFor();
+        await page.getByRole('button', { name: 'Retry Now', exact: true }).click();
+        await page.locator('article .badge').filter({ hasText: /^queued$/ }).waitFor({ timeout: 2000 });
+        await page.getByText('4 queued.', { exact: false }).waitFor({ timeout: 2000 });
+      }
     }
     // Client-side navigation keeps the document and basename.
     await page.evaluate(() => { window.smokeMarker = true; });
@@ -67,12 +86,22 @@ try {
     await page.getByRole('button', { name: 'Add to Download Queue' }).click();
     await page.getByText('Added 1 item(s)').waitFor();
     assert.equal(await page.locator('textarea[name="urls"]').inputValue(), '');
+    delayConfiguration = true;
+    configuration.download_folder = '/updated-by-server';
+    const configurationRequest = page.waitForRequest(request => request.url().endsWith('/api/config'));
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await configurationRequest;
+    await page.getByLabel('Download Folder', { exact: true }).fill('/unsaved-draft');
+    assert.equal(typeof releaseConfiguration, 'function');
+    const refreshedConfiguration = page.waitForResponse(response => response.url().endsWith('/api/config'));
+    releaseConfiguration();
+    await refreshedConfiguration;
+    assert.equal(await page.getByLabel('Download Folder', { exact: true }).inputValue(), '/unsaved-draft');
     await page.getByRole('button', { name: 'Save Configuration', exact: true }).click();
     await page.getByText('Configuration saved.', { exact: true }).waitFor();
     const saved = JSON.parse(mutations.at(-1).body);
     assert.equal(saved.api_token, undefined);
-    assert.equal(saved.download_folder, '/downloads');
+    assert.equal(saved.download_folder, '/unsaved-draft');
     session = { ...session, authenticated: false };
     await page.goto(`http://127.0.0.1:${server.port}${prefix}/repair`);
     await page.getByRole('heading', { name: 'Login', exact: true }).waitFor();
@@ -86,7 +115,7 @@ try {
     await page.close();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: all 11 routes, root/prefix deployments, client navigation, download and settings submissions, authentication/setup redirects; no browser errors.');
+  console.log('PASS: all 11 routes, root/prefix deployments, client navigation, download and settings submissions, mutation refreshes, unsaved drafts, authentication/setup redirects; no browser errors.');
 } finally {
   await browser.close();
   server.stop(true);

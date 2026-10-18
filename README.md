@@ -73,7 +73,16 @@ The GUI uses React, Vite, and Bun. React Router Data mode declares the routes in
 `web/src/app/router.tsx`, with a shared `<Outlet />` layout and a session loader.
 Pages, components, and API behavior live together under `web/src/domains`.
 The small fetch wrapper in `web/src/shared/api/client.ts` handles the deployment
-prefix, JSON, cookies, and errors; polling stays with the feature that owns it.
+prefix, JSON, cookies, and errors. TanStack Query owns server data, deduplication,
+polling, and mutation invalidation. Domain `*.queries.ts` files declare query keys
+and options, and the owning components call `useQuery` and `useMutation` directly.
+
+Query defaults live in `web/src/app/query-client.ts`. Reads use a short freshness
+window and at most one retry for network/server errors; mutations never retry or
+queue themselves for later execution when offline. Repair actions invalidate the
+repair views, and settings drafts stay local so refetches cannot replace unsaved
+edits. The route loader checks authentication afresh and clears protected cached
+data when the session is no longer authorized.
 
 ```sh
 bun install --frozen-lockfile

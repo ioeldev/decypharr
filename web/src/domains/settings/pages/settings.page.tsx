@@ -1,11 +1,14 @@
-import { jsonObjectSchema } from '../../../shared/api/json-response';
-import { useApiResource } from '../../../shared/hooks/use-api-resource';
+import { configurationQuery } from '../settings.queries';
+import { useQuery } from '@tanstack/react-query';
 import SettingsEditor from './components/settings-editor';
 
 export default function SettingsPage() {
-  const configuration = useApiResource({ path: 'api/config', parse: jsonObjectSchema.parse });
-  if (configuration.state.kind === 'loading') return <p>Loading configuration…</p>;
-  if (configuration.state.kind === 'error') return <section><p role="alert">{configuration.state.message}</p><button className="btn" onClick={() => configuration.reload()}>Retry</button></section>;
+  const configuration = useQuery(configurationQuery());
+  if (configuration.isPending) return <p>Loading configuration…</p>;
+  if (configuration.isError && !configuration.data) return <section><p role="alert">{configuration.error.message}</p><button className="btn" onClick={() => void configuration.refetch()}>Retry</button></section>;
 
-  return <SettingsEditor initial={configuration.state.value} />;
+  return <>
+    {configuration.isError ? <p role="alert">{configuration.error.message} Showing the last received configuration.</p> : null}
+    <SettingsEditor initial={configuration.data} />
+  </>;
 }

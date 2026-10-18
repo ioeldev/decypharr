@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { z } from 'zod';
 import { appUrl, requestJson } from '../../../shared/api/client';
-import { useAction } from '../../../shared/hooks/use-action';
+import { useMutation } from '@tanstack/react-query';
 import ActionMessage from '../../../shared/components/action-message';
 import FormField from '../../../shared/components/form-field';
 
@@ -16,7 +16,9 @@ export default function SetupPage() {
   const [mountType, setMountType] = useState('dfs');
   const [token, setToken] = useState('');
   const [isComplete, setIsComplete] = useState(false);
-  const action = useAction();
+  const action = useMutation({
+    mutationFn: (operation: () => Promise<string>) => operation(),
+  });
 
   if (isComplete) return <section className="card bg-base-100 p-6 space-y-4">
     <h1 className="text-2xl">Setup complete</h1>
@@ -33,7 +35,7 @@ export default function SetupPage() {
       if (step < 5) { setStep(step + 1); return; }
 
       const fields = new FormData(event.currentTarget);
-      action.run(async () => {
+      action.mutate(async () => {
         if (provider === '' && !hasUsenet) throw new Error('Configure at least one Debrid or Usenet provider.');
         if (authMode === 'password' && fields.get('password') !== fields.get('confirmPassword')) throw new Error('Passwords do not match.');
 
@@ -99,6 +101,6 @@ export default function SetupPage() {
         <button className="btn btn-primary" disabled={action.isPending}>{step === 5 ? 'Complete Setup' : 'Next'}</button>
       </div>
     </form>
-    <ActionMessage state={action.state} />
+    <ActionMessage state={action} />
   </section>;
 }
