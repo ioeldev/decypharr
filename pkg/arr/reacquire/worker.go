@@ -499,7 +499,17 @@ func (s *Service) updateJobState(id string, status Status, mutate func(*Job), du
 	job.EntryID = original.EntryID
 	job.FileID = original.FileID
 	job.DownloadID = original.DownloadID
-	job.Bindings = cloneJob(original).Bindings
+	if !original.WholeSeasonReplacement && job.WholeSeasonReplacement {
+		if !durable || status != StatusResolving || original.Status != StatusResolving {
+			return Job{}, ErrBindingUnsafe
+		}
+		if err := validateSeasonSnapshot(original, job.Bindings); err != nil {
+			return Job{}, err
+		}
+	} else {
+		job.Bindings = cloneJob(original).Bindings
+	}
+	job.WholeSeasonReplacement = original.WholeSeasonReplacement || job.WholeSeasonReplacement
 	job.CreatedAt = original.CreatedAt
 	if job.PhaseStartedAt.IsZero() {
 		job.PhaseStartedAt = original.UpdatedAt
@@ -699,7 +709,7 @@ func (s *Service) completeJobFromIndex(job Job) error {
 }
 
 func (s *Service) replacementsForJob(job Job) ([]string, bool) {
-	if len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile {
+	if job.WholeSeasonReplacement || (len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile) {
 		return nil, false
 	}
 	downloads := make(map[string]struct{})

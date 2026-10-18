@@ -196,6 +196,7 @@ type Job struct {
 	LastObservationAttemptAt time.Time         `json:"lastObservationAttemptAt,omitzero"`
 	DownloadRemaining        float64           `json:"downloadRemaining,omitempty"`
 	DownloadProgressAt       time.Time         `json:"downloadProgressAt,omitzero"`
+	WholeSeasonReplacement   bool              `json:"wholeSeasonReplacement,omitempty"`
 	LibraryAudit             bool              `json:"libraryAudit,omitempty"`
 	Paused                   bool              `json:"paused,omitempty"`
 	RetryCount               int               `json:"retryCount,omitempty"`

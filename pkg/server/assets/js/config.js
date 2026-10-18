@@ -252,6 +252,9 @@ class ConfigManager {
             if ($('repair.'+key)) $('repair.'+key).value = repair[key] || fallback;
         }
         if ($('repair.queue_paused')) $('repair.queue_paused').checked = !!repair.queue_paused;
+        for (const key of ['replace_whole_season', 'scheduled_full_audit']) {
+            if ($('repair.' + key)) $('repair.' + key).checked = !!repair[key];
+        }
         if ($('repair.library_audit')) $('repair.library_audit').checked = !!repair.library_audit;
         if ($('repair.verify_content')) $('repair.verify_content').checked = !!repair.verify_content;
     }
@@ -275,6 +278,8 @@ class ConfigManager {
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
             library_audit: $('repair.library_audit')?.checked || false,
+            replace_whole_season: $('repair.replace_whole_season')?.checked || false,
+            scheduled_full_audit: $('repair.scheduled_full_audit')?.checked || false,
             queue_interval: $('repair.queue_interval')?.value.trim() || '10s',
             queue_batch_size: parseInt($('repair.queue_batch_size')?.value,10) || 50,
             queue_batch_pause: $('repair.queue_batch_pause')?.value.trim() || '5m',

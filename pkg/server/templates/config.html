@@ -1783,7 +1783,15 @@ fe80::/10</textarea>
                             </label>
                             <label class="label cursor-pointer justify-start gap-3">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.library_audit" name="repair.library_audit">
-                                <span class="label-text font-medium">Audit library reads on scheduled runs (64 KiB per imported file, sequential)</span>
+                                <span class="label-text font-medium">Audit library reads on scheduled runs (64 KiB per imported file, concurrent workers)</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.scheduled_full_audit" name="repair.scheduled_full_audit">
+                                <span class="label-text font-medium">Recheck every file on scheduled library audits, including recently healthy files</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="repair.replace_whole_season" name="repair.replace_whole_season">
+                                <span class="label-text font-medium">Replace the whole Sonarr season when an episode is broken, including healthy files. Pack first, then episode search. Files are removed before searching; playback may be unavailable until replacement.</span>
                             </label>
                             <label class="label cursor-pointer justify-start gap-3"
                                    title="Read each media file's head and check for a valid container signature during NZB probes. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed.">

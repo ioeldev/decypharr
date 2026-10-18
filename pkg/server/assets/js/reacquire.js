@@ -486,6 +486,7 @@ class ReacquireManager {
                 : this.escape(job.arrName || '-')],
             ['Source', this.escape(job.cause || '-')],
             ['Strategy', this.escape(job.strategy || '-')],
+            ['Replacement scope', job.wholeSeasonReplacement ? 'Whole season (snapshot saved)' : 'Original files'],
             ['Broken download', job.downloadId ? `<code class="text-xs">${this.escape(job.downloadId)}</code>` : '-'],
             ['Replacement', job.replacementDownloadId ? `<code class="text-xs">${this.escape(job.replacementDownloadId)}</code>` : '-'],
             ['Created', this.formatTime(job.createdAt)],

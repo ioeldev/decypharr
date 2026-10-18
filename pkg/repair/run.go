@@ -26,6 +26,9 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 	if opts.LibraryAudit == nil {
 		opts.LibraryAudit = new(cfg.LibraryAudit)
 	}
+	if trigger == storage.RepairTriggerScheduled && *opts.LibraryAudit && cfg.ScheduledFullAudit {
+		opts.IgnoreLastChecked = true
+	}
 	if opts.VerifyContent == nil {
 		opts.VerifyContent = new(cfg.VerifyContent)
 	}

@@ -213,7 +213,8 @@ const (
 
 // RepairConfig is the single, global configuration for the health checker.
 // When Enabled is true, a recurring sweep runs on Schedule and visits only
-// entries that are unhealthy, dirty, or older than RecheckInterval.
+// entries that are unhealthy, dirty, or older than RecheckInterval, unless
+// ScheduledFullAudit requests a full library audit regardless of freshness.
 type RepairConfig struct {
 	Enabled               bool         `json:"enabled,omitempty"`
 	Source                RepairSource `json:"source,omitempty"`
@@ -224,6 +225,8 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
+	ReplaceWholeSeason    bool         `json:"replace_whole_season,omitempty"`
+	ScheduledFullAudit    bool         `json:"scheduled_full_audit,omitempty"`
 	LibraryAudit          bool         `json:"library_audit,omitempty"`
 	QueueInterval         string       `json:"queue_interval,omitempty"`
 	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
@@ -254,7 +257,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && r.QueueSearchWorkers == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
+		!r.AutoRepair && !r.LibraryAudit && !r.ReplaceWholeSeason && !r.ScheduledFullAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && r.QueueSearchWorkers == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
 }
 
 type Config struct {
