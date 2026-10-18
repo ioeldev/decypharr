@@ -224,77 +224,77 @@ func (s *Service) loadJobs(jobs []Job) error {
 }
 
 func (s *Service) run(ctx context.Context) {
-	dispatchTicker := time.NewTicker(time.Second)
-	defer dispatchTicker.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-dispatchTicker.C:
-			s.signal()
+		case <-ticker.C:
 		case <-s.wake:
-			for {
-				handler := s.currentHandler()
-				if handler == nil {
-					break
-				}
-				job, ok := s.nextJob()
-				if !ok {
-					break
-				}
-				if job.Status == StatusRetryScheduled {
-					if !s.prepareRecoveryRetry(ctx, job) {
-						if ctx.Err() != nil {
-							return
-						}
-						current, found := s.Job(job.ID)
-						if found && current.Status == StatusRetryScheduled && !current.RetryAt.After(s.now()) {
-							break
-						}
-						continue
-					}
-					current, found := s.Job(job.ID)
-					if !found || current.Status != StatusRetryScheduled {
-						continue
-					}
-					job = current
-				}
-				if err := s.reserveRepairDispatch(job); err != nil {
-					break
-				}
-				checkCtx, cancel := context.WithTimeout(ctx, executionTimeout)
-				covered, checkErr := s.completeQueuedLibraryJob(checkCtx, job)
-				cancel()
-				if ctx.Err() != nil {
-					return
-				}
-				if checkErr != nil {
-					status := job.Status
-					if errors.Is(checkErr, ErrBindingUnsafe) {
-						status = StatusFailed
-					}
-					_, updateErr := s.updateJobDurable(job.ID, status, func(job *Job) {
-						job.LastError = checkErr.Error()
-						if status == StatusQueued || status == StatusRetryScheduled {
-							job.RetryAt = s.now().Add(retryMaxDelay)
-						}
-					})
-					if updateErr != nil {
-						break
-					}
-					continue
-				}
-				if covered {
-					continue
-				}
-				if !s.runJob(ctx, handler, job) {
-					break
-				}
-				if ctx.Err() != nil {
-					return
-				}
-			}
 		}
+		for ctx.Err() == nil {
+			handler := s.currentHandler()
+			if handler == nil {
+				break
+			}
+			job, ok := s.nextJob()
+			if !ok {
+				break
+			}
+			// This single dispatcher reserves pacing before launching workers. Claim
+			// the media scope while it is still queued, including during slow preflight.
+			if err := s.reserveRepairDispatch(job); err != nil {
+				break
+			}
+			s.jobsMu.Lock()
+			s.executing[job.ID] = job
+			s.jobsMu.Unlock()
+			s.wg.Go(func() {
+				defer func() {
+					s.jobsMu.Lock()
+					delete(s.executing, job.ID)
+					s.jobsMu.Unlock()
+					s.signal()
+				}()
+				s.dispatchJob(ctx, handler, job)
+			})
+		}
+	}
+}
+
+func (s *Service) dispatchJob(ctx context.Context, handler Handler, job Job) {
+	if job.Status == StatusRetryScheduled {
+		if !s.prepareRecoveryRetry(ctx, job) {
+			return
+		}
+		current, found := s.Job(job.ID)
+		if !found || current.Status != StatusRetryScheduled {
+			return
+		}
+		job = current
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, executionTimeout)
+	covered, checkErr := s.completeQueuedLibraryJob(checkCtx, job)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if checkErr != nil {
+		status := job.Status
+		if errors.Is(checkErr, ErrBindingUnsafe) {
+			status = StatusFailed
+		}
+		_, _ = s.updateJobDurable(job.ID, status, func(job *Job) {
+			job.LastError = checkErr.Error()
+			if status == StatusQueued || status == StatusRetryScheduled {
+				job.RetryAt = s.now().Add(retryMaxDelay)
+			}
+		})
+		return
+	}
+	if !covered {
+		s.runJob(ctx, handler, job)
 	}
 }
 
@@ -312,8 +312,10 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 	started, err := s.updateObservedJob(job, StatusResolving, func(current *Job) {
 		current.RetryAt = time.Time{}
 		if job.Status == StatusRetryScheduled {
-			current.Attempts = append(current.Attempts, RecoveryAttempt{Number: current.RetryCount + 1, StartedAt: attemptStart(job), EndedAt: s.now(), Outcome: current.RetryReason, Mutations: cloneJob(job).Mutations})
-			current.RetryCount++
+			current.Attempts = append(current.Attempts, RecoveryAttempt{Number: len(current.Attempts) + 1, StartedAt: attemptStart(job), EndedAt: s.now(), Outcome: current.RetryReason, Mutations: cloneJob(job).Mutations})
+			if job.RetryReason != "rate_limited" {
+				current.RetryCount++
+			}
 			current.RetryReason = ""
 			current.Mutations = nil
 			current.SearchCompletedAt = time.Time{}
@@ -350,6 +352,9 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 	if err != nil && !deadline.IsZero() && !s.now().Before(deadline) {
 		return s.stopReconciliation(job.ID, fmt.Errorf("Arr reconciliation deadline expired: %w", err))
 	}
+	if limit, ok := errors.AsType[*arr.SearchRateLimitError](err); ok && current.Cause == CauseRepair {
+		return s.deferRateLimitedSearch(current, limit) == nil
+	}
 	if errors.Is(err, arr.ErrMutationOutcomeUnknown) {
 		delay := retryDelay(current, err)
 		if !deadline.IsZero() {
@@ -371,7 +376,7 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 				return s.stopReconciliation(job.ID, err)
 			}
 		}
-		if current.Cause == CauseRepair && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errNoReplacement)) {
+		if current.Cause == CauseRepair && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, arr.ErrReleaseSearch) || errors.Is(err, errNoReplacement)) {
 			reason := "search_error"
 			if errors.Is(err, errNoReplacement) {
 				reason = "no_download"
@@ -402,7 +407,15 @@ func (s *Service) nextJob() (Job, bool) {
 	s.repairQueueMu.Unlock()
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
+	if policyErr != nil || len(s.executing) >= policy.SearchWorkers {
+		return Job{}, false
+	}
 	inFlight := 0
+	for id, claimed := range s.executing {
+		if claimed.Cause == CauseRepair && !s.jobs[id].occupiesSlot() {
+			inFlight++
+		}
+	}
 	for _, job := range s.jobs {
 		if job.Cause == CauseRepair && job.occupiesSlot() {
 			inFlight++
@@ -413,6 +426,12 @@ func (s *Service) nextJob() (Job, bool) {
 	found := false
 	for _, id := range s.activeReacquisitions {
 		job, ok := s.jobs[id]
+		if _, running := s.executing[id]; running {
+			continue
+		}
+		if s.arrs != nil && job.newDispatch() && s.now().Before(s.arrs.SearchRetryAt(job.ArrName)) {
+			continue
+		}
 		if !ok || !job.Status.dispatchable() || job.Paused || job.RetryAt.After(s.now()) {
 			continue
 		}

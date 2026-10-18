@@ -12,6 +12,7 @@ type RepairQueuePolicy struct {
 	Interval      time.Duration
 	BatchSize     int
 	BatchPause    time.Duration
+	SearchWorkers int
 	MaxActive     int
 	SearchTimeout time.Duration
 	SearchGrace   time.Duration
@@ -20,7 +21,13 @@ type RepairQueuePolicy struct {
 }
 
 func (r RepairConfig) QueuePolicy() (RepairQueuePolicy, error) {
-	p := RepairQueuePolicy{Interval: 10 * time.Second, BatchSize: 50, BatchPause: 5 * time.Minute, MaxActive: 10, Paused: r.QueuePaused, SearchTimeout: 5 * time.Minute, SearchGrace: 2 * time.Minute, RetryDelays: []time.Duration{6 * time.Hour, 24 * time.Hour, 72 * time.Hour}}
+	p := RepairQueuePolicy{SearchWorkers: 3, Interval: 10 * time.Second, BatchSize: 50, BatchPause: 5 * time.Minute, MaxActive: 10, Paused: r.QueuePaused, SearchTimeout: 5 * time.Minute, SearchGrace: 2 * time.Minute, RetryDelays: []time.Duration{6 * time.Hour, 24 * time.Hour, 72 * time.Hour}}
+	if r.QueueSearchWorkers < 0 || r.QueueSearchWorkers > 10 {
+		return p, fmt.Errorf("repair.queue_search_workers must be between 1 and 10 (or 0 for the default)")
+	}
+	if r.QueueSearchWorkers > 0 {
+		p.SearchWorkers = r.QueueSearchWorkers
+	}
 	if r.QueueBatchSize < 0 || r.QueueMaxActive < 0 {
 		return p, fmt.Errorf("repair queue batch size and max active must not be negative")
 	}

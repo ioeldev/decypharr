@@ -23,18 +23,21 @@ type repairQueueState struct {
 }
 
 type RepairQueueStatus struct {
-	Queued        int            `json:"queued"`
-	Total         int            `json:"total"`
-	StatusCounts  map[Status]int `json:"status_counts"`
-	InFlight      int            `json:"in_flight"`
-	InBatch       int            `json:"in_batch"`
-	NextAllowedAt time.Time      `json:"next_allowed_at,omitzero"`
-	Interval      string         `json:"interval"`
-	BatchSize     int            `json:"batch_size"`
-	BatchPause    string         `json:"batch_pause"`
-	MaxActive     int            `json:"max_active"`
-	Paused        bool           `json:"paused"`
-	Error         string         `json:"error,omitempty"`
+	Queued          int                  `json:"queued"`
+	Total           int                  `json:"total"`
+	StatusCounts    map[Status]int       `json:"status_counts"`
+	InFlight        int                  `json:"in_flight"`
+	InBatch         int                  `json:"in_batch"`
+	NextAllowedAt   time.Time            `json:"next_allowed_at,omitzero"`
+	Interval        string               `json:"interval"`
+	BatchSize       int                  `json:"batch_size"`
+	BatchPause      string               `json:"batch_pause"`
+	SearchCooldowns map[string]time.Time `json:"search_cooldowns,omitempty"`
+	SearchWorkers   int                  `json:"search_workers"`
+	Searching       int                  `json:"searching"`
+	MaxActive       int                  `json:"max_active"`
+	Paused          bool                 `json:"paused"`
+	Error           string               `json:"error,omitempty"`
 }
 
 func (s *Service) loadRepairQueue() error {
@@ -96,7 +99,7 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 	state := s.repairQueueState
 	lastError := s.repairQueueError
 	s.repairQueueMu.Unlock()
-	out := RepairQueueStatus{InBatch: state.InBatch, NextAllowedAt: state.NextAllowedAt, Interval: policy.Interval.String(), BatchSize: policy.BatchSize, BatchPause: policy.BatchPause.String(), MaxActive: policy.MaxActive, Paused: policy.Paused, Error: lastError}
+	out := RepairQueueStatus{SearchWorkers: policy.SearchWorkers, InBatch: state.InBatch, NextAllowedAt: state.NextAllowedAt, Interval: policy.Interval.String(), BatchSize: policy.BatchSize, BatchPause: policy.BatchPause.String(), MaxActive: policy.MaxActive, Paused: policy.Paused, Error: lastError}
 	if err != nil {
 		out.Error = err.Error()
 		out.Paused = true
@@ -104,9 +107,23 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 	out.StatusCounts = make(map[Status]int)
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
+	out.Searching = len(s.executing)
+	for id, job := range s.executing {
+		if job.Cause == CauseRepair && !s.jobs[id].occupiesSlot() {
+			out.InFlight++
+		}
+	}
 	for _, job := range s.jobs {
 		if job.Cause != CauseRepair {
 			continue
+		}
+		if s.arrs != nil {
+			if until := s.arrs.SearchRetryAt(job.ArrName); s.now().Before(until) {
+				if out.SearchCooldowns == nil {
+					out.SearchCooldowns = make(map[string]time.Time)
+				}
+				out.SearchCooldowns[job.ArrName] = until
+			}
 		}
 		out.Total++
 		out.StatusCounts[job.Status]++
@@ -124,7 +141,7 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 	return out
 }
 
-// Called by the single worker immediately before starting a new repair. Write
+// Called by the single dispatcher immediately before starting a new repair. Write
 // and sync the reservation before any Arr mutation. A failed save blocks dispatch.
 func (s *Service) reserveRepairDispatch(job Job) error {
 	if job.Cause != CauseRepair || !job.newDispatch() {

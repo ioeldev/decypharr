@@ -98,9 +98,10 @@ class ReacquireManager {
             this.repairQueue = await this.fetchJSON(`${this.api}/arr/reacquire/queue`);
             const q = this.repairQueue;
             const counts = q.status_counts || {};
+            const cooldowns = Object.entries(q.search_cooldowns||{}).map(([name,until])=>`${name} until ${new Date(until).toLocaleTimeString()}`).join(', ');
             const next = q.next_allowed_at ? new Date(q.next_allowed_at) : null;
             const wait = next && next > new Date() ? ` Next slot: ${next.toLocaleTimeString()}.` : '';
-            if (label) label.textContent = `Repair queue: ${q.queued} queued, ${q.in_flight}/${q.max_active} active slots, ${counts.ready || 0} imported, ${counts.failed || 0} failed, ${counts.needs_attention || 0} need attention (all retained repair jobs). ${q.paused ? 'Paused.' : `${q.interval} minimum interval; batches of ${q.batch_size}, pause ${q.batch_pause}.`}${wait}${q.error ? ` ${q.error}` : ''}`;
+            if (label) label.textContent = `Repair queue: ${q.queued} queued, ${q.in_flight}/${q.max_active} active slots, ${q.searching||0}/${q.search_workers||3} search workers, ${counts.ready || 0} imported, ${counts.failed || 0} failed, ${counts.needs_attention || 0} need attention (all retained repair jobs). ${q.paused ? 'Paused.' : `${q.interval} minimum interval; batches of ${q.batch_size}, pause ${q.batch_pause}.`}${wait}${cooldowns?` Search rate limit: ${cooldowns}.`:''}${q.error ? ` ${q.error}` : ''}`;
             if (button) { button.textContent = q.paused ? 'Resume repairs' : 'Pause repairs'; button.disabled = false; }
         } catch (e) {
             if (label) label.textContent = 'Repair queue status unavailable.';

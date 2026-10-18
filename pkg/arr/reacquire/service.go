@@ -59,6 +59,7 @@ type Service struct {
 	handler              Handler
 	wg                   sync.WaitGroup
 	jobsMu               sync.RWMutex
+	executing            map[string]Job // protected by jobsMu; includes preflight work
 	jobs                 map[string]Job
 	activeReacquisitions map[jobKey]string
 }
@@ -89,6 +90,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		repairQueuePath:      filepath.Join(options.Directory, "repair_queue.json"),
 		now:                  func() time.Time { return time.Now().UTC() },
 		handler:              options.Handler,
+		executing:            make(map[string]Job),
 		jobs:                 make(map[string]Job),
 		activeReacquisitions: make(map[jobKey]string),
 	}, nil

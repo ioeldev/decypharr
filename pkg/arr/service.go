@@ -23,16 +23,21 @@ type Service struct {
 	mu   sync.RWMutex
 	arrs map[string]Arr
 
-	client   *request.Client
-	mutation *request.Client
-	logger   zerolog.Logger
-	cleanups singleflight.Group
+	search         *request.Client
+	searchMu       sync.Mutex
+	searchCooldown map[string]searchCooldown
+	client         *request.Client
+	mutation       *request.Client
+	logger         zerolog.Logger
+	cleanups       singleflight.Group
 }
 
 func New() *Service {
 	service := &Service{
-		arrs:   make(map[string]Arr),
-		logger: logger.New("arr"),
+		arrs:           make(map[string]Arr),
+		logger:         logger.New("arr"),
+		search:         request.New(request.WithTimeout(0), request.WithResponseHeaderTimeout(0), request.WithMaxRetries(0), request.WithRetryableStatus()),
+		searchCooldown: make(map[string]searchCooldown),
 		client: request.New(
 			request.WithTimeout(0),
 			request.WithMaxRetries(5),

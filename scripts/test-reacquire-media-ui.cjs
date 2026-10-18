@@ -42,6 +42,14 @@ for(const asset of ['js','build/js']){
   const html=manager.mediaHTML(binding({libraryPath:'/tv/<img onerror=evil()>/Season 1/show.S01E01.mkv',arrName:'evil"&name'}));
   assert.doesNotMatch(html,/<img/);assert.match(html,/&lt;img/);assert.match(html,/arr=evil%22%26name/);
  });
+ test(`${asset}: queue summary distinguishes search workers and shows Arr cooldowns`,async()=>{
+  const {manager,elements}=harness(asset);
+  manager.fetchJSON=async()=>({queued:40,in_flight:12,max_active:20,searching:3,search_workers:3,status_counts:{ready:9},interval:'5s',batch_size:50,batch_pause:'2m',search_cooldowns:{'tv-sonarr':'2026-10-18T20:00:00Z'}});
+  await manager.loadRepairQueue();
+  const text=elements.get('repairQueueSummary').textContent;
+  assert.match(text,/12\/20 active slots, 3\/3 search workers/);
+  assert.match(text,/Search rate limit: tv-sonarr until/);
+ });
  test(`${asset}: metadata loads separately, deduplicates media, limits concurrency and caches failures`,async()=>{
   const {manager}=harness(asset);const calls=[];const pending=[];
   manager.jobs=[9,9,10,11].map(id=>({bindings:[binding({seriesId:id})]}));

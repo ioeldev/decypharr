@@ -371,7 +371,7 @@ func (s *Service) scheduleRecovery(j Job, reason, message string) error {
 		current.ObservationError = ""
 		if status == StatusRetryScheduled {
 			delay := policy.RetryDelays[j.RetryCount]
-			if reason == "search_error" {
+			if reason == "search_error" || reason == "rate_limited" {
 				delay = []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute}[min(j.RetryCount, 2)]
 			}
 			current.RetryAt = s.now().Add(delay)
@@ -502,6 +502,13 @@ func recoveryScopes(job Job) []string {
 func (s *Service) scopeGuardsLocked() func(Job) bool {
 	occupied := make(map[string]bool)
 	deferred := make(map[string]Job)
+	for _, claimed := range s.executing {
+		if claimed.Cause == CauseRepair {
+			for _, key := range recoveryScopes(claimed) {
+				occupied[key] = true
+			}
+		}
+	}
 	for _, other := range s.jobs {
 		if other.Cause != CauseRepair || other.Status.Terminal() {
 			continue
@@ -530,4 +537,27 @@ func (s *Service) scopeGuardsLocked() func(Job) bool {
 		}
 		return false
 	}
+}
+
+// A 429 does not establish that a search ran. Keep its delay and release capacity.
+func (s *Service) deferRateLimitedSearch(j Job, limit *arr.SearchRateLimitError) error {
+	for _, mutation := range j.Mutations {
+		if mutation.State == MutationIntent && mutation.Attempts > 0 {
+			return s.attention(j, "Remote action outcome unknown; inspect Arr before retrying")
+		}
+	}
+	_, err := s.updateObservedJob(j, StatusRetryScheduled, func(next *Job) {
+		next.RetryReason = "rate_limited"
+		next.LastError = limit.Error()
+		next.ObservationError = ""
+		next.RetryAt = maxTime(s.now().Add(time.Minute), limit.RetryAt)
+	})
+	return err
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }

@@ -228,6 +228,7 @@ type RepairConfig struct {
 	QueueInterval         string       `json:"queue_interval,omitempty"`
 	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
 	QueueBatchPause       string       `json:"queue_batch_pause,omitempty"`
+	QueueSearchWorkers    int          `json:"queue_search_workers,omitempty"`
 	QueueMaxActive        int          `json:"queue_max_active,omitempty"`
 	QueueSearchTimeout    string       `json:"queue_search_timeout,omitempty"`
 	QueueSearchGrace      string       `json:"queue_search_grace,omitempty"`
@@ -253,7 +254,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
+		!r.AutoRepair && !r.LibraryAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && r.QueueSearchWorkers == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
 }
 
 type Config struct {

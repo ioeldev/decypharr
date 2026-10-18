@@ -248,7 +248,7 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
-        for (const [key, fallback] of Object.entries({queue_interval:'10s',queue_batch_size:50,queue_batch_pause:'5m',queue_max_active:10,queue_search_timeout:'5m',queue_search_grace:'2m',queue_retry_delays:'6h,24h,72h'})) {
+        for (const [key, fallback] of Object.entries({queue_interval:'10s',queue_batch_size:50,queue_batch_pause:'5m',queue_max_active:10,queue_search_workers:3,queue_search_timeout:'5m',queue_search_grace:'2m',queue_retry_delays:'6h,24h,72h'})) {
             if ($('repair.'+key)) $('repair.'+key).value = repair[key] || fallback;
         }
         if ($('repair.queue_paused')) $('repair.queue_paused').checked = !!repair.queue_paused;
@@ -278,6 +278,7 @@ class ConfigManager {
             queue_interval: $('repair.queue_interval')?.value.trim() || '10s',
             queue_batch_size: parseInt($('repair.queue_batch_size')?.value,10) || 50,
             queue_batch_pause: $('repair.queue_batch_pause')?.value.trim() || '5m',
+            queue_search_workers: parseInt($('repair.queue_search_workers')?.value,10) || 3,
             queue_max_active: parseInt($('repair.queue_max_active')?.value,10) || 10,
             queue_search_timeout: $('repair.queue_search_timeout')?.value.trim() || '5m',
             queue_search_grace: $('repair.queue_search_grace')?.value.trim() || '2m',

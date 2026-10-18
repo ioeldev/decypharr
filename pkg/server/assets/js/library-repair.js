@@ -78,7 +78,7 @@ class LibraryRepairManager {
             this.data=await this.request(`${this.api}/repair/library`);
             this.updated=new Date();this.render();
             const q=this.data.queue||{};
-            document.getElementById('libraryStatus').textContent=`${q.paused?'Queue paused. ':''}${q.in_flight||0}/${q.max_active||0} active recoveries. Updated ${this.updated.toLocaleTimeString()}.`;
+            document.getElementById('libraryStatus').textContent=`${q.paused?'Queue paused. ':''}${q.in_flight||0}/${q.max_active||0} active recoveries · ${q.searching||0}/${q.search_workers||3} search workers. Updated ${this.updated.toLocaleTimeString()}.`;
         } catch(e) {
             document.getElementById('libraryStatus').textContent=`Tracking unavailable; ${this.updated?`showing data from ${this.updated.toLocaleTimeString()}`:'retrying automatically'}. ${e.message}`;
         } finally {this.loading=false;this.timer=setTimeout(()=>this.load(),10000);}
