@@ -27,7 +27,7 @@ try {
     '/api/arr/reacquire/jobs': [{ id: 'job', status: 'needs_attention', arrName: 'shows', retryReason: 'no_download', createdAt: '2026-10-18', bindings: [{ arrName: 'shows', arrType: 'sonarr', seriesId: 9, episodeIds: [100], libraryPath: '/tv/Show/Season 1/Show.S01E01.mkv' }] }],
     '/api/arr/media/details': { title: 'Canonical Show', episodes: [{ id: 100, seasonNumber: 2, episodeNumber: 3 }] },
     '/api/arr/bindings': [], '/api/arr/index': [], '/api/arrs': [],
-    '/api/repair/library': { incidents: [{ entry_name: 'incident', status: 'broken', display_name: 'Example file', library_file: { arr_name: 'shows', arr_fingerprint: 'a', arr_kind: 'sonarr', media_id: 9, season_number: 1, episode_id: 100, source_path: '/tv/Show/Season 1/file.mkv' } }], jobs: [], maxRetries: 3 },
+    '/api/repair/library': { findings: [{ health: { entry_name: 'incident', status: 'broken', display_name: 'Example file' }, job: null, file: { arr_name: 'shows', arr_fingerprint: 'a', arr_kind: 'sonarr', media_id: 9, season_number: 1, episode_id: 100, source_path: '/tv/Show/Season 1/file.mkv' }, label: 'Example file', category: 'pending', season: 1 }], total: 1, page: 1, limit: 50, maxRetries: 3 },
     '/debug/stats': { memory: { alloc: 123 }, mount: { type: 'dfs' }, debrids: [], usenet: { providers: [] }, access: { webdav: { enabled: true, path: '/webdav' } } },
   };
   for (const prefix of ['', '/base']) {
@@ -57,6 +57,17 @@ try {
         return route.fulfill({ json: path === '/api/add' ? [{ status: 'success' }] : { success: true, message: 'Saved' } });
       }
       if (path === '/api/ui') return route.fulfill({ json: session });
+      if (path === '/api/repair/library') {
+        assert.equal(url.searchParams.get('limit'), '50');
+        const pageNumber = Number(url.searchParams.get('page'));
+        const search = url.searchParams.get('search');
+        const fixture = fixtures[path];
+        const findings = Array.from({ length: search ? 1 : 50 }, (_, index) => ({
+          ...fixture.findings[0], label: search || `Example file ${pageNumber}-${index}`,
+          health: { ...fixture.findings[0].health, entry_name: `incident-${pageNumber}-${index}` },
+        }));
+        return route.fulfill({ json: { ...fixture, findings, page: pageNumber, total: search ? 1 : 10000 } });
+      }
       if (path === '/api/config' && delayConfiguration) {
         delayConfiguration = false;
         await new Promise(resolve => { releaseConfiguration = resolve; });
@@ -70,6 +81,20 @@ try {
       await page.waitForTimeout(150);
       assert.equal(await page.getByRole('alert').count(), 0, `${path}: ${await page.getByRole('alert').allTextContents()}`);
       if (path === '/repair') await page.locator('summary').filter({ hasText: 'Submission complete' }).waitFor();
+      if (path === '/repair/library') {
+        await page.getByText('10000 findings · up to 50 per page', { exact: true }).waitFor();
+        assert.equal(await page.locator('article').count(), 50);
+        const nextPage = page.waitForRequest(request => request.url().includes('/api/repair/library?') && new URL(request.url()).searchParams.get('page') === '2');
+        await page.getByRole('button', { name: 'Next', exact: true }).click();
+        await nextPage;
+        await page.getByText('Example file 2-0', { exact: true }).waitFor({ state: 'attached' });
+        const searchRequest = page.waitForRequest(request => request.url().includes('/api/repair/library?') && new URL(request.url()).searchParams.get('search') === 'A distant finding');
+        await page.getByLabel('Search findings', { exact: true }).fill('A distant finding');
+        const searched = await searchRequest;
+        assert.equal(new URL(searched.url()).searchParams.get('page'), '1');
+        await page.getByText('A distant finding', { exact: true }).waitFor({ state: 'attached' });
+        assert.equal(await page.locator('article').count(), 1);
+      }
       if (path === '/repair/reacquire') {
         await page.getByRole('link', { name: 'Canonical Show · S02E03' }).waitFor();
         await page.getByRole('button', { name: 'Retry Now', exact: true }).click();

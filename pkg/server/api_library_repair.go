@@ -10,10 +10,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
 )
 
 func (s *Server) handleLibraryIncidents(w http.ResponseWriter, r *http.Request) {
+	options, err := parseLibraryPage(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	repair := s.manager.Repair()
 	recovery := s.manager.ArrService()
 	if repair == nil || recovery == nil {
@@ -25,18 +29,14 @@ func (s *Server) handleLibraryIncidents(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Could not load library findings", 500)
 		return
 	}
-	jobs := make([]reacquire.Job, 0)
-	for _, j := range recovery.Jobs() {
-		if j.Cause == reacquire.CauseRepair {
-			jobs = append(jobs, j)
-		}
-	}
 	policy, err := config.Get().Repair.QueuePolicy()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	utils.JSONResponse(w, map[string]any{"incidents": incidents, "jobs": jobs, "queue": recovery.RepairQueueStatus(), "maxRetries": len(policy.RetryDelays)}, http.StatusOK)
+	page := paginateLibraryFindings(buildLibraryFindings(incidents, recovery.LibraryFindingJobs()), options)
+	page.MaxRetries = len(policy.RetryDelays)
+	utils.JSONResponse(w, page, http.StatusOK)
 }
 
 func (s *Server) handleRetryRecoveryJob(w http.ResponseWriter, r *http.Request) {

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { repairKeys } from '../../../repair.queries';
 import { Link } from 'react-router-dom';
 import { appUrl, request } from '../../../../../shared/api/client';
@@ -8,6 +9,7 @@ import RecordDetails from '../../../../../shared/components/record-details';
 import { findingChangedAt, type LibraryFinding as Finding } from '../library-findings';
 
 export default function LibraryFinding({ finding, maxRetries }: { finding: Finding; maxRetries: number }) {
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const queryClient = useQueryClient();
   const action = useMutation({
     mutationFn: changeFinding,
@@ -51,7 +53,7 @@ export default function LibraryFinding({ finding, maxRetries }: { finding: Findi
       {job?.status === 'needs_attention' ? <Link className="btn btn-xs" to="/repair/reacquire">Review Recovery</Link> : null}
       <a className="btn btn-xs" href={appUrl(`api/repair/library/media?${link}`)} target="_blank" rel="noreferrer">Open in Arr</a>
     </div>
-    <details><summary className="cursor-pointer">Details</summary><RecordDetails value={{ health, job, file }} /></details>
+    <details onToggle={(event) => setIsDetailsOpen(event.currentTarget.open)}><summary className="cursor-pointer">Details</summary>{isDetailsOpen ? <RecordDetails value={{ health, job, file }} /> : null}</details>
     <ActionMessage state={action} />
   </article>;
 }

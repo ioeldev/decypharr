@@ -140,6 +140,29 @@ func (s *Service) Jobs() []Job {
 	return jobs
 }
 
+// LibraryFindingJobs snapshots only the repair identity and current state needed
+// by the findings view, avoiding deep copies of historical attempts and mutations.
+func (s *Service) LibraryFindingJobs() []Job {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobs := make([]Job, 0)
+	for _, job := range s.jobs {
+		if job.Cause != CauseRepair {
+			continue
+		}
+		job.Attempts = nil
+		job.Mutations = nil
+		job.ReplacementDownloadIDs = nil
+		job.Bindings = slices.Clone(job.Bindings)
+		for index := range job.Bindings {
+			job.Bindings[index] = cloneBinding(job.Bindings[index])
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs
+}
+
 func (s *Service) Job(id string) (Job, bool) {
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()

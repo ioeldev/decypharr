@@ -1,3 +1,4 @@
+import { libraryFindingsPageSchema } from './pages/library/library-findings';
 import { queryOptions } from '@tanstack/react-query';
 import { requestJson } from '../../shared/api/client';
 import { jsonObjectSchema } from '../../shared/api/json-response';
@@ -44,11 +45,14 @@ export function entryHealthQuery(name: string) {
   });
 }
 
-export function libraryFindingsQuery() {
+export function libraryFindingsQuery(parameters: { page: number; search: string; status: string; sort: string }) {
+  const search = new URLSearchParams({ ...parameters, page: String(parameters.page), limit: '50' });
   return queryOptions({
-    queryKey: [...repairKeys.all, 'findings'],
-    queryFn: ({ signal }) => requestJson('api/repair/library', { signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) }).then(jsonObjectSchema.parse),
-    refetchInterval: 10000,
+    queryKey: [...repairKeys.all, 'findings', parameters],
+    queryFn: ({ signal }) => requestJson(`api/repair/library?${search}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) }).then(libraryFindingsPageSchema.parse),
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    gcTime: 60000,
   });
 }
 
