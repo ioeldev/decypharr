@@ -1,3 +1,4 @@
+import PageHeader from '@/shared/components/page-header';
 import RepairNavigation from '../../components/repair-navigation';
 import RecoveryQueue from '../../components/recovery-queue';
 import AuditStatus from './components/audit-status';
@@ -7,7 +8,19 @@ import BrokenEntries from './components/broken-entries';
 import RepairMaintenance from './components/repair-maintenance';
 
 export default function AuditPage() {
-  return <div className="space-y-6"><h1 className="text-2xl font-bold">Repair</h1><RepairNavigation />
-    <AuditStatus /><RunControls /><RecoveryQueue /><BrokenEntries /><RunHistory /><RepairMaintenance />
-  </div>;
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Repair"
+        description="Check library health, repair entries, and track recovery."
+      />
+      <RepairNavigation />
+      <AuditStatus />
+      <RunControls />
+      <RecoveryQueue />
+      <BrokenEntries />
+      <RunHistory />
+      <RepairMaintenance />
+    </div>
+  );
 }

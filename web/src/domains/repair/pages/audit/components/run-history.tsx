@@ -1,3 +1,7 @@
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
+import LoadingState from '@/shared/components/loading-state';
+import { Button } from '@/shared/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { repairKeys, repairHistoryQuery } from '../../../repair.queries';
 import { request } from '../../../../../shared/api/client';
 import { stringValue } from '../../../../../shared/api/json-response';
@@ -13,21 +17,62 @@ export default function RunHistory() {
     mutationFn: (operation: () => Promise<string>) => operation(),
     onSettled: () => queryClient.invalidateQueries({ queryKey: repairKeys.all }),
   });
-  if (history.isPending) return <p>Loading run history…</p>;
+  if (history.isPending) return <LoadingState label="Loading run history…" />;
   if (history.isError && !history.data) return <p role="alert">{history.error.message}</p>;
-
-  return <section className="card bg-base-100 p-5 space-y-4">
-    {history.isError ? <p role="alert">{history.error.message} Showing the last received data.</p> : null}
-    <h2 className="text-xl">Run History</h2>
-    <div className="flex gap-2"><button className="btn btn-sm" onClick={() => void history.refetch()}>Refresh</button>
-      <button className="btn btn-sm" disabled={action.isPending} onClick={() => {
-        if (!confirm('Clear all run history?')) return;
-        action.mutate(async () => { await request('api/repair/runs', { method: 'DELETE' }); return 'History cleared.'; });
-      }}>Clear History</button></div>
-    {history.data.length === 0 ? <p>No runs yet.</p> : history.data.map(presentRun).map((run, index) => <details className="collapse collapse-arrow bg-base-200" key={stringValue(run.id) || index}>
-      <summary className="collapse-title">{stringValue(run.started_at)} · {stringValue(run.status)} · {stringValue(run.source)}</summary>
-      <div className="collapse-content"><RecordDetails value={run} /></div>
-    </details>)}
-    <ActionMessage state={action} />
-  </section>;
+  return (
+    <Card className="flex flex-col gap-4">
+      <CardHeader>
+        <CardTitle>
+          <h2 className="text-xl">Run History</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex min-w-0 flex-col gap-4">
+        {history.isError ? (
+          <p role="alert">{history.error.message} Showing the last received data.</p>
+        ) : null}
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={() => void history.refetch()} variant="secondary" size="sm">
+            Refresh
+          </Button>
+          <Button
+            disabled={action.isPending}
+            onClick={() => {
+              if (!confirm('Clear all run history?')) return;
+              action.mutate(async () => {
+                await request('api/repair/runs', { method: 'DELETE' });
+                return 'History cleared.';
+              });
+            }}
+            variant="secondary"
+            size="sm"
+          >
+            Clear History
+          </Button>
+        </div>
+        {history.data.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No runs yet.</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          history.data.map(presentRun).map((run, index) => (
+            <details
+              key={stringValue(run.id) || index}
+              className="rounded-xl border bg-card bg-muted/50"
+            >
+              <summary className="cursor-pointer p-4 font-medium">
+                {stringValue(run.started_at)} · {stringValue(run.status)} ·{' '}
+                {stringValue(run.source)}
+              </summary>
+              <div className="px-4 pb-4">
+                <RecordDetails value={run} />
+              </div>
+            </details>
+          ))
+        )}
+        <ActionMessage state={action} />
+      </CardContent>
+    </Card>
+  );
 }

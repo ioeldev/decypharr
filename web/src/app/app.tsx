@@ -1,20 +1,54 @@
-import { Outlet, useNavigation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigation } from 'react-router-dom';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/shared/components/ui/sidebar';
+import { Separator } from '@/shared/components/ui/separator';
+import { TooltipProvider } from '@/shared/components/ui/tooltip';
 import Navigation from './navigation';
 
+const sectionTitles: Record<string, string> = {
+  download: 'Download',
+  browse: 'Library',
+  repair: 'Repair',
+  settings: 'Settings',
+  stats: 'Statistics',
+};
 export default function App() {
   const navigation = useNavigation();
-
+  const { pathname } = useLocation();
+  const sectionTitle = sectionTitles[pathname.split('/')[1] ?? ''] ?? 'Dashboard';
   return (
-    <div className="min-h-screen bg-base-200 flex flex-col">
-      <Navigation />
-      <main className="flex-1 container mx-auto px-4 py-6" aria-busy={navigation.state !== 'idle'}><Outlet /></main>
-      <footer className="footer footer-center p-6 bg-base-300">
-        <aside className="flex gap-4">
-          <a className="link" href="https://github.com/sirrobot01/decypharr">GitHub</a>
-          <a className="link" href="https://docs.decypharr.com/">Documentation</a>
-          <a className="link" href="https://sponsor.decypharr.com">Sponsor</a>
-        </aside>
-      </footer>
-    </div>
+    <TooltipProvider>
+      <SidebarProvider>
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:bg-background focus:p-3"
+        >
+          Skip to content
+        </a>
+        <Navigation />
+        <SidebarInset className="min-w-0">
+          <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4 md:px-8">
+            <SidebarTrigger />
+            <Separator orientation="vertical" className="h-5" />
+            <span className="text-sm text-muted-foreground">Workspace</span>
+            <span className="text-sm text-muted-foreground">/</span>
+            <span className="text-sm font-medium">{sectionTitle}</span>
+          </header>
+          <div
+            id="main-content"
+            tabIndex={-1}
+            className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 p-4 md:p-8"
+            aria-busy={navigation.state !== 'idle'}
+          >
+            <Outlet />
+          </div>
+          <footer className="flex flex-wrap gap-4 border-t px-4 py-5 text-xs text-muted-foreground md:px-8">
+            <span className="mr-auto">Decypharr · Media workspace</span>
+            <a href="https://github.com/sirrobot01/decypharr">GitHub</a>
+            <a href="https://docs.decypharr.com/">Documentation</a>
+            <a href="https://sponsor.decypharr.com">Sponsor</a>
+          </footer>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }

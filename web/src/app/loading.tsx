@@ -1,3 +1,5 @@
+import LoadingState from '@/shared/components/loading-state';
+
 export default function Loading() {
-  return <p role="status" className="p-6">Loading Decypharr…</p>;
+  return <LoadingState label="Loading Decypharr…" />;
 }

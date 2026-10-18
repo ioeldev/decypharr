@@ -1,22 +1,116 @@
-import { arrayValue, objectValue, stringValue, type JsonValue } from '../../../../shared/api/json-response';
-import type { SettingsField as Field } from '../../settings.types';
+import { useId } from 'react';
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+  FieldSet,
+  FieldLegend,
+} from '@/shared/components/ui/field';
+import { NativeSelect, NativeSelectOption } from '@/shared/components/ui/native-select';
+import { Input } from '@/shared/components/ui/input';
+import { Checkbox } from '@/shared/components/ui/checkbox';
+import { arrayValue, objectValue, stringValue, type JsonValue } from '@/shared/api/json-response';
+import type { SettingsField as SettingsFieldDefinition } from '../../settings.types';
 import SettingsObject from './settings-object';
 import SettingsList from './settings-list';
 
-export default function SettingsField({ field, value, onChange }: { field: Field; value: JsonValue | undefined; onChange: (value: JsonValue) => void }) {
-  if (field.kind === 'object') return <fieldset className="border border-base-300 rounded-box p-4"><legend className="font-bold px-2">{field.label}</legend><SettingsObject fields={field.fields} value={objectValue(value)} onChange={onChange} /></fieldset>;
-  if (field.kind === 'list') return <SettingsList field={field} value={arrayValue(value)} onChange={onChange} />;
-  if (field.kind === 'boolean' && !field.isOptional) return <label className="fieldset"><span className="font-medium">{field.label}</span><input className="checkbox" type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />{field.description ? <span className="text-sm opacity-70">{field.description}</span> : null}</label>;
+type SettingsFieldProps = {
+  field: SettingsFieldDefinition;
+  value: JsonValue | undefined;
+  onChange: (value: JsonValue) => void;
+};
 
-  return <label className="fieldset gap-2">
-    <span className="font-medium">{field.label}</span>
-    {field.kind === 'boolean' ? <select className="select w-full" value={value === undefined || value === null ? '' : String(value)} onChange={(event) => onChange(event.target.value === '' ? null : event.target.value === 'true')}><option value="">Use default</option><option value="true">Enabled</option><option value="false">Disabled</option></select> : null}
-    {field.kind === 'choice' ? <select className="select w-full" value={stringValue(value)} onChange={(event) => onChange(event.target.value)}>
-      <option value="">Default / None</option>{field.options.filter(Boolean).map((option) => <option key={option}>{option}</option>)}
-      {value && !field.options.includes(stringValue(value)) ? <option value={stringValue(value)}>{stringValue(value)}</option> : null}
-    </select> : null}
-    {field.kind === 'number' ? <input className="input w-full" type="number" step="any" value={typeof value === 'number' ? value : ''} onChange={(event) => onChange(event.target.value === '' ? 0 : Number(event.target.value))} /> : null}
-    {field.kind === 'text' ? <input className="input w-full" type={field.isSecret ? 'password' : 'text'} autoComplete="off" value={stringValue(value)} onChange={(event) => onChange(event.target.value)} /> : null}
-    {field.description ? <span className="text-sm opacity-70">{field.description}</span> : null}
-  </label>;
+export default function SettingsField({ field, value, onChange }: SettingsFieldProps) {
+  const id = useId();
+  const descriptionId = field.description ? `${id}-description` : undefined;
+
+  if (field.kind === 'object')
+    return (
+      <FieldSet className="rounded-xl border p-4">
+        <FieldLegend>{field.label}</FieldLegend>
+        <SettingsObject fields={field.fields} value={objectValue(value)} onChange={onChange} />
+      </FieldSet>
+    );
+
+  if (field.kind === 'list')
+    return <SettingsList field={field} value={arrayValue(value)} onChange={onChange} />;
+
+  if (field.kind === 'boolean' && !field.isOptional)
+    return (
+      <Field orientation="horizontal">
+        <Checkbox
+          id={id}
+          checked={Boolean(value)}
+          onCheckedChange={(isChecked) => onChange(isChecked === true)}
+          aria-describedby={descriptionId}
+        />
+        <div className="flex flex-col gap-1">
+          <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+          {field.description ? (
+            <FieldDescription id={descriptionId}>{field.description}</FieldDescription>
+          ) : null}
+        </div>
+      </Field>
+    );
+
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+      {field.kind === 'boolean' ? (
+        <NativeSelect
+          id={id}
+          className="w-full"
+          aria-describedby={descriptionId}
+          value={value === undefined || value === null ? '' : String(value)}
+          onChange={(event) =>
+            onChange(event.target.value === '' ? null : event.target.value === 'true')
+          }
+        >
+          <NativeSelectOption value="">Use default</NativeSelectOption>
+          <NativeSelectOption value="true">Enabled</NativeSelectOption>
+          <NativeSelectOption value="false">Disabled</NativeSelectOption>
+        </NativeSelect>
+      ) : null}
+      {field.kind === 'choice' ? (
+        <NativeSelect
+          id={id}
+          className="w-full"
+          aria-describedby={descriptionId}
+          value={stringValue(value)}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <NativeSelectOption value="">Default / None</NativeSelectOption>
+          {field.options.filter(Boolean).map((option) => (
+            <NativeSelectOption key={option}>{option}</NativeSelectOption>
+          ))}
+          {value && !field.options.includes(stringValue(value)) ? (
+            <NativeSelectOption value={stringValue(value)}>{stringValue(value)}</NativeSelectOption>
+          ) : null}
+        </NativeSelect>
+      ) : null}
+      {field.kind === 'number' ? (
+        <Input
+          id={id}
+          aria-describedby={descriptionId}
+          type="number"
+          step="any"
+          value={typeof value === 'number' ? value : ''}
+          onChange={(event) => onChange(event.target.value === '' ? 0 : Number(event.target.value))}
+        />
+      ) : null}
+      {field.kind === 'text' ? (
+        <Input
+          id={id}
+          aria-describedby={descriptionId}
+          type={field.isSecret ? 'password' : 'text'}
+          autoComplete="off"
+          value={stringValue(value)}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : null}
+      {field.description ? (
+        <FieldDescription id={descriptionId}>{field.description}</FieldDescription>
+      ) : null}
+    </Field>
+  );
 }

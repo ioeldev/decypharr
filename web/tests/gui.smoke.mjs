@@ -80,6 +80,31 @@ try {
       await page.getByRole('heading', { name: title, exact: true }).waitFor();
       await page.waitForTimeout(150);
       assert.equal(await page.getByRole('alert').count(), 0, `${path}: ${await page.getByRole('alert').allTextContents()}`);
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+        for (const width of [320, 375, 768, 1440]) {
+          await page.setViewportSize({ width, height: 1000 });
+          await page.waitForTimeout(30);
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${path}: horizontal overflow at ${width}px in ${theme} theme`);
+        }
+      }
+      await page.screenshot({ path: `/tmp/decypharr-ui-${prefix ? 'base-' : ''}${path.replaceAll('/', '-') || 'dashboard'}.png`, fullPage: true });
+      if (path === '/') {
+        const queueFixture = fixtures['/api/torrents'];
+        queueFixture.torrents = [{ info_hash: 'test-hash', name: 'A long media title '.repeat(12), size: 1073741824, progress: 0.42, protocol: 'torrent', state: 'downloading', category: 'movies', active_provider: 'realdebrid' }];
+        queueFixture.total = 1;
+        await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+        const progress = page.getByRole('progressbar');
+        await progress.waitFor();
+        assert.equal(await progress.getAttribute('aria-valuenow'), '42');
+        await page.getByRole('checkbox', { name: 'Select all visible entries', exact: true }).check();
+        await page.getByRole('button', { name: 'Delete Selected (1)', exact: true }).waitFor();
+        await page.setViewportSize({ width: 375, height: 812 });
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'populated queue: mobile overflow');
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        queueFixture.torrents = [];
+        queueFixture.total = 0;
+      }
       if (path === '/repair') await page.locator('summary').filter({ hasText: 'Submission complete' }).waitFor();
       if (path === '/repair/library') {
         await page.getByText('10000 findings · up to 50 per page', { exact: true }).waitFor();
@@ -98,16 +123,32 @@ try {
       if (path === '/repair/reacquire') {
         await page.getByRole('link', { name: 'Canonical Show · S02E03' }).waitFor();
         await page.getByRole('button', { name: 'Retry Now', exact: true }).click();
-        await page.locator('article .badge').filter({ hasText: /^queued$/ }).waitFor({ timeout: 2000 });
+        await page.locator('article [data-slot=badge]').filter({ hasText: /^queued$/ }).waitFor({ timeout: 2000 });
         await page.getByText('4 queued.', { exact: false }).waitFor({ timeout: 2000 });
       }
     }
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).click();
+    const mobileSidebar = page.getByRole('dialog');
+    await mobileSidebar.getByRole('link', { name: 'Download', exact: true }).click();
+    await mobileSidebar.waitFor({ state: 'hidden' });
+    await page.getByRole('heading', { name: 'Add Downloads' }).waitFor();
+    await page.screenshot({ path: `/tmp/decypharr-mobile-${prefix ? 'base' : 'root'}.png`, fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const previousTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+    await page.getByRole('button', { name: /^(Light|Dark) theme$/ }).click();
+    assert.notEqual(await page.evaluate(() => document.documentElement.dataset.theme), previousTheme);
+    await page.reload();
+    assert.notEqual(await page.evaluate(() => document.documentElement.dataset.theme), previousTheme);
+    await page.getByRole('heading', { name: 'Add Downloads' }).waitFor();
     // Client-side navigation keeps the document and basename.
     await page.evaluate(() => { window.smokeMarker = true; });
     await page.getByRole('link', { name: 'Download', exact: true }).click();
     await page.getByRole('heading', { name: 'Add Downloads' }).waitFor();
     assert.equal(await page.evaluate(() => window.smokeMarker), true);
     await page.locator('textarea[name="urls"]').fill('magnet:?xt=urn:btih:test');
+    await page.getByLabel('Skip Multi-Season Checker', { exact: true }).check();
+    assert.equal(await page.locator('form').evaluate(form => new FormData(form).has('skipMultiSeason')), true);
     await page.getByRole('button', { name: 'Add to Download Queue' }).click();
     await page.getByText('Added 1 item(s)').waitFor();
     assert.equal(await page.locator('textarea[name="urls"]').inputValue(), '');
@@ -127,6 +168,13 @@ try {
     const saved = JSON.parse(mutations.at(-1).body);
     assert.equal(saved.api_token, undefined);
     assert.equal(saved.download_folder, '/unsaved-draft');
+    await page.setViewportSize({ width: 375, height: 812 });
+    const settingsTabs = page.getByRole('tab');
+    for (const tab of await settingsTabs.all()) {
+      await tab.click();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `settings ${await tab.textContent()}: mobile overflow`);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
     session = { ...session, authenticated: false };
     await page.goto(`http://127.0.0.1:${server.port}${prefix}/repair`);
     await page.getByRole('heading', { name: 'Login', exact: true }).waitFor();
@@ -137,10 +185,20 @@ try {
     session = { ...session, setup_required: true };
     await page.goto(`http://127.0.0.1:${server.port}${prefix}/`);
     await page.getByRole('heading', { name: 'Setup Wizard' }).waitFor();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByLabel('Authentication mode', { exact: true }).selectOption('token');
+    for (let step = 0; step < 5; step++) {
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `setup step ${step}: mobile overflow`);
+      if (step === 1) await page.getByLabel('API key', { exact: true }).fill('test-key');
+      if (step === 3) await page.getByLabel('Download folder', { exact: true }).fill('/downloads');
+      if (step === 4) await page.getByLabel('Mount system', { exact: true }).selectOption('none');
+      await page.getByRole('button', { name: 'Next', exact: true }).click();
+    }
+    await page.getByRole('heading', { name: 'Review', exact: true }).waitFor();
     await page.close();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: all 11 routes, root/prefix deployments, client navigation, download and settings submissions, mutation refreshes, unsaved drafts, authentication/setup redirects; no browser errors.');
+  console.log('PASS: all 11 routes, both themes, 320/375/768/1440px layouts, mobile drawer, persisted theme, all settings sections, setup steps, populated queue selection/progress, root/prefix deployments, submissions and redirects; no browser errors.');
 } finally {
   await browser.close();
   server.stop(true);

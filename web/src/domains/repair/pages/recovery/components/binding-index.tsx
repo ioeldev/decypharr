@@ -1,3 +1,5 @@
+import { Button } from '@/shared/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { repairKeys, bindingIndexQuery } from '../../../repair.queries';
 import { request } from '../../../../../shared/api/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,10 +13,32 @@ export default function BindingIndex() {
     mutationFn: (operation: () => Promise<string>) => operation(),
     onSettled: () => queryClient.invalidateQueries({ queryKey: repairKeys.all }),
   });
-  return <section className="card bg-base-100 p-5 space-y-3"><h2 className="text-xl">Arr Binding Index</h2>
-    <button className="btn btn-sm w-fit" disabled={action.isPending} onClick={() => action.mutate(async () => { await request('api/arr/index/refresh', { method: 'POST' }); return 'Index refresh queued.'; })}>Rebuild Index</button>
-    {index.data !== undefined ? <RecordDetails value={index.data} /> : null}
-    {(index.isError && !index.data) ? <p role="alert">{index.error.message}</p> : null}
-    <ActionMessage state={action} />
-  </section>;
+  return (
+    <Card className="flex flex-col gap-3">
+      <CardHeader>
+        <CardTitle>
+          <h2 className="text-xl">Arr Binding Index</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex min-w-0 flex-col gap-4">
+        <Button
+          disabled={action.isPending}
+          onClick={() =>
+            action.mutate(async () => {
+              await request('api/arr/index/refresh', { method: 'POST' });
+              return 'Index refresh queued.';
+            })
+          }
+          variant="secondary"
+          size="sm"
+          className="w-fit"
+        >
+          Rebuild Index
+        </Button>
+        {index.data !== undefined ? <RecordDetails value={index.data} /> : null}
+        {index.isError && !index.data ? <p role="alert">{index.error.message}</p> : null}
+        <ActionMessage state={action} />
+      </CardContent>
+    </Card>
+  );
 }
