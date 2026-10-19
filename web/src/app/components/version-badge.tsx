@@ -12,12 +12,19 @@ export default function VersionBadge() {
   });
   if (version.isPending) return <Badge variant="secondary">Loading version…</Badge>;
   if (!version.data) return <Badge variant="secondary">Version unavailable</Badge>;
+  const versionLabel = `${version.data.channel}-${version.data.version}`;
+  const shortenedLabel = versionLabel.length > 22
+    ? `${versionLabel.slice(0, 10)}...${versionLabel.slice(-9)}`
+    : versionLabel;
+
   return (
-    <Badge asChild>
+    <Badge asChild className="min-w-0 max-w-full overflow-hidden">
       <a
+        title={versionLabel}
+        aria-label={versionLabel}
         href={`https://github.com/sirrobot01/decypharr/releases/tag/v${encodeURIComponent(version.data.version)}`}
       >
-        {version.data.channel}-{version.data.version}
+        {shortenedLabel}
       </a>
     </Badge>
   );
