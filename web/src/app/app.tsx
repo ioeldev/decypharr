@@ -28,7 +28,7 @@ export default function App() {
         <SidebarInset className="min-w-0">
           <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4 md:px-5">
             <SidebarTrigger />
-            <Separator orientation="vertical" className="h-5" />
+            <Separator orientation="vertical" />
             <span className="text-sm text-muted-foreground">Workspace</span>
             <span className="text-sm text-muted-foreground">/</span>
             <span className="text-sm font-medium">{sectionTitle}</span>
