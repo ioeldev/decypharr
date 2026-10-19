@@ -49,18 +49,10 @@ func (s *Server) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 
 	if err := cfg.SetupComplete(); err == nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		http.Redirect(w, r, s.webURL(""), http.StatusSeeOther)
 		return
 	}
-	data := map[string]any{
-		"URLBase": cfg.URLBase,
-		"Page":    "setup",
-		"Title":   "Setup Wizard",
-	}
-	err := s.templates.ExecuteTemplate(w, "setup_layout", data)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("template error")
-	}
+	s.serveGUI(w, r)
 }
 
 // sendSetupError sends an error response
@@ -288,7 +280,7 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 	response := SetupWizardResponse{
 		Success:    true,
 		Message:    "Setup completed successfully! Restarting services...",
-		RedirectTo: "/",
+		RedirectTo: s.webURL(""),
 	}
 	if auth := cfg.GetAuth(); auth != nil && auth.TokenOnly {
 		response.APIToken = auth.APIToken

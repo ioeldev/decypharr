@@ -23,6 +23,12 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 	if !cfg.Enabled && trigger == storage.RepairTriggerScheduled {
 		return "", errors.New("repair disabled")
 	}
+	if opts.LibraryAudit == nil {
+		opts.LibraryAudit = new(cfg.LibraryAudit)
+	}
+	if trigger == storage.RepairTriggerScheduled && *opts.LibraryAudit && cfg.ScheduledFullAudit {
+		opts.IgnoreLastChecked = true
+	}
 	if opts.VerifyContent == nil {
 		opts.VerifyContent = new(cfg.VerifyContent)
 	}
@@ -37,6 +43,9 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 	runCtx, cancel := context.WithCancel(r.parentCtx)
 	stopState := &repairStopState{}
 	sourceParts := []string{string(cfg.Source)}
+	if *opts.LibraryAudit {
+		sourceParts = []string{"library-audit"}
+	}
 	if opts.IgnoreLastChecked {
 		sourceParts = append(sourceParts, "ignore-last-checked")
 	}
@@ -47,13 +56,13 @@ func (r *Service) runSweep(trigger storage.RepairRunTrigger, opts RunOptions) (s
 			sourceParts = append(sourceParts, "no-auto-repair")
 		}
 	}
-	if opts.UnrestrictLink {
+	if opts.UnrestrictLink && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "unrestrict-link")
 	}
-	if opts.VerifyContent != nil && *opts.VerifyContent {
+	if opts.VerifyContent != nil && *opts.VerifyContent && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "verify-content")
 	}
-	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" {
+	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" && !*opts.LibraryAudit {
 		sourceParts = append(sourceParts, "protocol-"+scope)
 	}
 	run := &storage.RepairRun{
@@ -178,6 +187,25 @@ func (r *Service) saveRun(run *storage.RepairRun) {
 }
 
 func (r *Service) saveHealth(state *storage.EntryHealth) {
+	r.auditControlMu.Lock()
+	defer r.auditControlMu.Unlock()
+	if state.LibraryFile != nil {
+		if old, err := r.storage.GetEntryHealth(state.EntryName); err == nil {
+			state.LibraryPaused = old.LibraryPaused
+			state.StatusChangedAt = old.StatusChangedAt
+			if old.Status != state.Status || old.FailureReason != state.FailureReason || old.LibraryRemoved != state.LibraryRemoved {
+				state.StatusChangedAt = time.Now()
+			} else if state.StatusChangedAt.IsZero() {
+				// Freeze the last known snapshot for legacy findings; a recheck
+				// with the same diagnosis is not a new state change.
+				state.StatusChangedAt = old.UpdatedAt
+			}
+		}
+		if state.StatusChangedAt.IsZero() {
+			state.StatusChangedAt = time.Now()
+		}
+	}
+
 	if err := r.storage.SaveEntryHealth(state); err != nil {
 		r.logger.Trace().Err(err).Str("entry", state.EntryName).Msg("Failed to persist entry health")
 	}

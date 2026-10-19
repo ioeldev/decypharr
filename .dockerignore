@@ -13,7 +13,7 @@ torrents.json
 docs/**
 
 # Don't copy node modules
-node_modules/
+**/node_modules/
 
 # Don't copy development files
 .git/
@@ -31,3 +31,7 @@ data/**
 
 .stignore
 .stfolder/**
+# Bun workspace manifests are needed by the frontend build stage.
+!package.json
+!web/package.json
+!web/tsconfig.json

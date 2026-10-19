@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io/fs"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,14 +12,13 @@ func (s *Server) WebRoutes() http.Handler {
 	// Apply setup redirect middleware globally
 	r.Use(s.setupRedirectMiddleware)
 
-	// Static assets - always public
-	staticFS, _ := fs.Sub(assetsEmbed, "assets/build")
-	imagesFS, _ := fs.Sub(imagesEmbed, "assets/images")
-	r.Handle("/assets/*", http.StripPrefix(s.urlBase+"assets/", http.FileServer(http.FS(staticFS))))
-	r.Handle("/images/*", http.StripPrefix(s.urlBase+"images/", http.FileServer(http.FS(imagesFS))))
+	r.Handle("/gui-assets/*", s.guiAssets())
+
+	r.Handle("/images/*", s.guiImages())
 
 	// Public routes - no auth needed
 	r.Get("/version", s.handleGetVersion)
+	r.Get("/api/ui", s.getGUIState)
 	r.Get("/login", s.LoginHandler)
 	r.Post("/login", s.LoginHandler)
 	r.Get("/register", s.RegisterHandler)
@@ -35,19 +33,23 @@ func (s *Server) WebRoutes() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware)
 		// Web pages
-		r.Get("/", s.IndexHandler)
-		r.Get("/browse", s.BrowseHandler)
-		r.Get("/download", s.DownloadHandler)
-		r.Get("/repair", s.RepairHandler)
-		r.Get("/repair/reacquire", s.ReacquireHandler)
-		r.Get("/stats", s.StatsHandler)
-		r.Get("/settings", s.ConfigHandler)
+		r.Get("/", s.serveGUI)
+		r.Get("/browse", s.serveGUI)
+		r.Get("/download", s.serveGUI)
+		r.Get("/repair", s.serveGUI)
+		r.Get("/repair/reacquire", s.serveGUI)
+		r.Get("/repair/library", s.serveGUI)
+		r.Get("/stats", s.serveGUI)
+		r.Get("/settings", s.serveGUI)
 
 		// API routes
 		r.Route("/api", func(r chi.Router) {
 			// Arr management
 			r.Get("/arrs", s.handleGetArrs)
 			r.Post("/add", s.handleAddContent)
+			r.Get("/arr/reacquire/queue", s.handleRepairQueueStatus)
+			r.Post("/arr/reacquire/queue", s.handlePauseRepairQueue)
+			r.Get("/arr/media/details", s.handleArrMediaDetails)
 			r.Get("/arr/reacquire/jobs", s.handleListArrReacquireJobs)
 			r.Get("/arr/reacquire/jobs/{id}", s.handleGetArrReacquireJob)
 			r.Post("/arr/reacquire/jobs/{id}/acknowledge", s.handleAcknowledgeArrReacquireJob)
@@ -58,6 +60,11 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Get("/arr/bindings", s.handleSearchArrBindings)
 
 			// Repair / health-checker operations
+			r.Get("/repair/library", s.handleLibraryIncidents)
+			r.Post("/repair/library/action", s.handleLibraryIncidentAction)
+			r.Get("/repair/library/media", s.handleLibraryMediaLink)
+			r.Post("/arr/reacquire/jobs/{id}/retry", s.handleRetryRecoveryJob)
+			r.Post("/arr/reacquire/jobs/{id}/pause", s.handlePauseRecoveryJob)
 			r.Get("/repair/config", s.handleGetRepairConfig)
 			r.Put("/repair/config", s.handleUpdateRepairConfig)
 			r.Get("/repair/status", s.handleRepairStatus)

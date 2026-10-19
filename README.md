@@ -66,3 +66,42 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## GUI development
+
+The GUI uses React, Vite, and Bun. React Router Data mode declares the routes in
+`web/src/app/router.tsx`, with a shared `<Outlet />` layout and a session loader.
+Pages, components, and API behavior live together under `web/src/domains`.
+The small fetch wrapper in `web/src/shared/api/client.ts` handles the deployment
+prefix, JSON, cookies, and errors. TanStack Query owns server data, deduplication,
+polling, and mutation invalidation. Domain `*.queries.ts` files declare query keys
+and options, and the owning components call `useQuery` and `useMutation` directly.
+
+Query defaults live in `web/src/app/query-client.ts`. Reads use a short freshness
+window and at most one retry for network/server errors; mutations never retry or
+queue themselves for later execution when offline. Repair actions invalidate the
+repair views, and settings drafts stay local so refetches cannot replace unsaved
+edits. The route loader checks authentication afresh and clears protected cached
+data when the session is no longer authorized.
+
+```sh
+bun install --frozen-lockfile
+bun run build
+# Start the Go backend using your normal development configuration, then:
+bun run dev
+```
+
+Vite serves the GUI at `http://localhost:5173` and proxies API requests to `http://localhost:8282`. Set `DECYPHARR_BACKEND_URL` to change the
+backend address. The development proxy assumes the backend uses the default
+`url_base` of `/`; use the Go-served build when checking a custom URL prefix.
+
+Run `bun run check` for TypeScript checks and `bun run test:web` for frontend tests.
+For browser smoke tests, install Chromium with `cd web && bunx playwright install chromium`,
+then run `bun run build` and `bun run test:browser` from the repository root. These
+tests use mock API responses and exercise every route at both `/` and `/base/`.
+
+Production builds must run `bun run build` **before** `go build`. Go embeds
+`web/dist` and serves it on the same origin as the API, using the configured
+`url_base` at runtime. Docker and standalone release workflows build these assets
+automatically; the deployed application does not need Bun or Node.js. Responsive
+layout improvements are a separate follow-up.

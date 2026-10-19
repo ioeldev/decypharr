@@ -14,7 +14,10 @@ func (job Job) reconciliationDeadline() time.Time {
 		}
 	}
 	if first.IsZero() && len(job.Mutations) == 0 {
-		first = job.StartedAt
+		first = job.AttemptStartedAt
+		if first.IsZero() {
+			first = job.StartedAt
+		}
 	}
 	if first.IsZero() {
 		return time.Time{}

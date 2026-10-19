@@ -325,6 +325,10 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			invalid = true
 			return fmt.Errorf("invalid request body: %w", err)
 		}
+		if _, err := next.Repair.QueuePolicy(); err != nil {
+			invalid = true
+			return err
+		}
 		next.MigrateVirtualFolders()
 		if err := next.ValidateVirtualFolders(); err != nil {
 			invalid = true
@@ -445,6 +449,10 @@ func (s *Server) handleUpdateRepairConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if _, err := req.QueuePolicy(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if req.Enabled {
 		if strings.TrimSpace(req.Schedule) == "" {
 			http.Error(w, "Schedule is required when repair is enabled", http.StatusBadRequest)
@@ -499,6 +507,7 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		LibraryAudit      *bool  `json:"library_audit,omitempty"`
 		IgnoreLastChecked bool   `json:"ignore_last_checked,omitempty"`
 		Force             bool   `json:"force,omitempty"`
 		AutoRepair        *bool  `json:"auto_repair,omitempty"`
@@ -562,6 +571,7 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := svc.RunNow(repair.RunOptions{
+		LibraryAudit:      req.LibraryAudit,
 		IgnoreLastChecked: ignoreLastChecked,
 		AutoRepair:        autoRepair,
 		UnrestrictLink:    unrestrictLink,

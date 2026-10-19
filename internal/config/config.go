@@ -64,6 +64,7 @@ func (q QBitTorrent) IsZero() bool {
 }
 
 type Arr struct {
+	BrowserURL       string `json:"browser_url,omitempty"`
 	Name             string `json:"name,omitempty"`
 	Host             string `json:"host,omitempty"`
 	Token            string `json:"token,omitempty"`
@@ -74,7 +75,7 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.BrowserURL == "" && a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps
@@ -212,7 +213,8 @@ const (
 
 // RepairConfig is the single, global configuration for the health checker.
 // When Enabled is true, a recurring sweep runs on Schedule and visits only
-// entries that are unhealthy, dirty, or older than RecheckInterval.
+// entries that are unhealthy, dirty, or older than RecheckInterval, unless
+// ScheduledFullAudit requests a full library audit regardless of freshness.
 type RepairConfig struct {
 	Enabled               bool         `json:"enabled,omitempty"`
 	Source                RepairSource `json:"source,omitempty"`
@@ -223,6 +225,18 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
+	ReplaceWholeSeason    bool         `json:"replace_whole_season,omitempty"`
+	ScheduledFullAudit    bool         `json:"scheduled_full_audit,omitempty"`
+	LibraryAudit          bool         `json:"library_audit,omitempty"`
+	QueueInterval         string       `json:"queue_interval,omitempty"`
+	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
+	QueueBatchPause       string       `json:"queue_batch_pause,omitempty"`
+	QueueSearchWorkers    int          `json:"queue_search_workers,omitempty"`
+	QueueMaxActive        int          `json:"queue_max_active,omitempty"`
+	QueueSearchTimeout    string       `json:"queue_search_timeout,omitempty"`
+	QueueSearchGrace      string       `json:"queue_search_grace,omitempty"`
+	QueueRetryDelays      string       `json:"queue_retry_delays,omitempty"`
+	QueuePaused           bool         `json:"queue_paused,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
 	// the streaming stack and check for a valid container signature, catching
@@ -243,7 +257,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && r.StopSchedule == ""
+		!r.AutoRepair && !r.LibraryAudit && !r.ReplaceWholeSeason && !r.ScheduledFullAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && r.QueueSearchWorkers == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
 }
 
 type Config struct {
@@ -365,6 +379,9 @@ func (c *Config) loadConfig() error {
 }
 
 func (c *Config) Validate() error {
+	if _, err := c.Repair.QueuePolicy(); err != nil {
+		return err
+	}
 	if err := validateDebrids(c.Debrids); err != nil {
 		return err
 	}

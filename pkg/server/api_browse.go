@@ -410,8 +410,8 @@ func (s *Server) handleTorrentDownload(w http.ResponseWriter, r *http.Request, e
 		return
 	}
 
-	w.Header().Set("X-Accel-Redirect", link.DownloadLink)
-	w.Header().Set("X-Accel-Buffering", "no")
+	// Expiring provider links need a browser redirect, not proxy-internal routing.
+	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, link.DownloadLink, http.StatusFound)
 }
 

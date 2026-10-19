@@ -45,15 +45,21 @@ type Service struct {
 	bindingRepository    *BindingRepository
 	jobRepository        *JobRepository
 	wake                 chan struct{}
+	repairQueueMu        sync.Mutex
+	repairQueueState     repairQueueState
+	repairQueueError     string
+	repairQueuePath      string
 	now                  func() time.Time
 	lifecycleMu          sync.RWMutex
 	started              bool
 	closed               bool
 	ctx                  context.Context
 	cancel               context.CancelFunc
+	importVerifier       func(context.Context, Job)
 	handler              Handler
 	wg                   sync.WaitGroup
 	jobsMu               sync.RWMutex
+	executing            map[string]Job // protected by jobsMu; includes preflight work
 	jobs                 map[string]Job
 	activeReacquisitions map[jobKey]string
 }
@@ -81,8 +87,10 @@ func NewService(options ServiceOptions) (*Service, error) {
 		bindingRepository:    bindingRepository,
 		jobRepository:        jobRepository,
 		wake:                 make(chan struct{}, 1),
+		repairQueuePath:      filepath.Join(options.Directory, "repair_queue.json"),
 		now:                  func() time.Time { return time.Now().UTC() },
 		handler:              options.Handler,
+		executing:            make(map[string]Job),
 		jobs:                 make(map[string]Job),
 		activeReacquisitions: make(map[jobKey]string),
 	}, nil
@@ -98,6 +106,9 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 
+	if err := s.loadRepairQueue(); err != nil {
+		return fmt.Errorf("load repair queue: %w", err)
+	}
 	bindings, err := s.bindingRepository.LoadAll()
 	if err != nil {
 		return fmt.Errorf("load arr bindings: %w", err)
@@ -126,6 +137,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.started = true
 	s.wg.Go(func() { s.run(s.ctx) })
+	s.wg.Go(func() { s.monitorRecoveries(s.ctx) })
 	s.schedulePersistedRetries()
 	s.signal()
 	return nil
@@ -294,5 +306,19 @@ func (s *Service) signal() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
+	}
+}
+
+func (s *Service) SetImportVerifier(verify func(context.Context, Job)) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.importVerifier = verify
+}
+func (s *Service) verifyImported(ctx context.Context, job Job) {
+	s.lifecycleMu.RLock()
+	verify := s.importVerifier
+	s.lifecycleMu.RUnlock()
+	if verify != nil && job.Cause == CauseRepair {
+		verify(ctx, job)
 	}
 }

@@ -1,0 +1,110 @@
+name: Build GHCR image
+
+on:
+  push:
+    branches: [ioel/shadcn-ui-refactor]
+    paths:
+      - web/src/app/components/version-badge.tsx
+      - .github/workflows/ghcr-manual.yml
+  workflow_dispatch:
+    inputs:
+      source_repository:
+        description: Source repository (upstream or custom fork)
+        type: choice
+        options:
+          - ioeldev/decypharr
+          - sirrobot01/decypharr
+        default: ioeldev/decypharr
+        required: true
+      source_ref:
+        description: Branch, tag, or full commit SHA to build
+        type: string
+        default: beta
+        required: true
+      channel:
+        description: Version channel embedded in the binary
+        type: choice
+        options:
+          - custom
+          - beta
+          - stable
+        default: custom
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'ioeldev/decypharr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Identify source and unique build
+        id: source
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.source_repository || github.repository }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          tag="sha-${sha}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "repository=$SOURCE_REPOSITORY" >> "$GITHUB_OUTPUT"
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/ioeldev/decypharr:${{ steps.source.outputs.tag }}
+          build-args: |
+            VERSION=${{ steps.source.outputs.sha }}
+            CHANNEL=${{ inputs.channel || 'custom' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/ioeldev/decypharr
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            io.ioeldev.decypharr.source=https://github.com/${{ steps.source.outputs.repository }}
+          cache-from: type=gha,scope=decypharr-manual
+          cache-to: type=gha,mode=max,scope=decypharr-manual
+      - name: Record deployment reference
+        env:
+          SOURCE_REPOSITORY: ${{ steps.source.outputs.repository }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          IMAGE_TAG: ${{ steps.source.outputs.tag }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          {
+            echo "### Published Decypharr image"
+            echo
+            echo "Source: $SOURCE_REPOSITORY@$SOURCE_SHA"
+            echo
+            echo "Tag: ghcr.io/ioeldev/decypharr:$IMAGE_TAG"
+            echo
+            echo 'Copy this reference into the deployment .env only when ready:'
+            echo '~~~dotenv'
+            echo "DECYPHARR_IMAGE=ghcr.io/ioeldev/decypharr@$IMAGE_DIGEST"
+            echo '~~~'
+            echo
+            echo 'Back up the matching configuration and persistent state before switching.'
+            echo 'This workflow does not deploy or restart the media stack.'
+          } >> "$GITHUB_STEP_SUMMARY"

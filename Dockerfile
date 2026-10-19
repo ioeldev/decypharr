@@ -1,3 +1,12 @@
+# Build browser assets natively; Bun is only needed during the build.
+FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS frontend
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY web/package.json ./web/package.json
+RUN bun install --frozen-lockfile
+COPY web ./web
+RUN bun run build
+
 # xx provides cross-compilation toolchains for CGO builds
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
@@ -24,6 +33,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download -x
 
 COPY . .
+COPY --from=frontend /app/web/dist ./web/dist
 
 # Build main binary — xx-go sets CC/CXX/GOOS/GOARCH automatically.
 # Use native libutp to avoid large Go allocations during peer connection setup.

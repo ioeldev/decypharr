@@ -29,3 +29,8 @@ node_modules/
 *.prof
 .codex/
 .claude/
+
+# Keep an embed marker so Go tooling works before the first GUI build.
+!web/dist/
+web/dist/*
+!web/dist/.gitkeep

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 
 	"github.com/google/uuid"
@@ -65,6 +66,11 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	for _, id := range s.activeReacquisitions {
 		active := s.jobs[id]
 		for _, existing := range active.Bindings {
+			if sameRecoveryMedia(existing, binding) {
+				job := cloneJob(active)
+				s.jobsMu.Unlock()
+				return &job, nil
+			}
 			if existing.ArrName == binding.ArrName && existing.ArrFileID == binding.ArrFileID &&
 				existing.ArrInstanceFingerprint == binding.ArrInstanceFingerprint {
 				job := cloneJob(active)
@@ -78,28 +84,41 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	if binding.DownloadID != "" {
 		bindings = s.index.ByDownloadID(binding.ArrName, binding.DownloadID)
 	}
-	bindings = slices.DeleteFunc(bindings, func(binding Binding) bool {
-		return !binding.AuthorizesMutation()
+	replaceLibrarySeason := request.LibraryAudit && request.Cause == CauseRepair &&
+		binding.ArrType == arr.Sonarr && config.Get().Repair.ReplaceWholeSeason
+	bindings = slices.DeleteFunc(bindings, func(candidate Binding) bool {
+		if !candidate.AuthorizesMutation() {
+			return true
+		}
+		// Library audits stop at the first broken file in each season. Keep
+		// multi-season downloads scoped to that season so snapshotSeason can
+		// include every imported sibling before replacement.
+		return replaceLibrarySeason && (candidate.SeriesID != binding.SeriesID || candidate.SeasonNumber != binding.SeasonNumber)
 	})
 	if len(bindings) == 0 {
 		bindings = []Binding{binding}
 	}
 	now := s.now()
 	job := Job{
-		ID:         uuid.NewString(),
-		Status:     StatusQueued,
-		Cause:      request.Cause,
-		Strategy:   request.Strategy,
-		ArrName:    binding.ArrName,
-		ArrType:    binding.ArrType,
-		EntryID:    request.EntryID,
-		FileID:     request.FileID,
-		DownloadID: binding.DownloadID,
-		Bindings:   bindings,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		LibraryAudit: request.LibraryAudit,
+		ID:           uuid.NewString(),
+		Status:       StatusQueued,
+		Cause:        request.Cause,
+		Strategy:     request.Strategy,
+		ArrName:      binding.ArrName,
+		ArrType:      binding.ArrType,
+		EntryID:      request.EntryID,
+		FileID:       request.FileID,
+		DownloadID:   binding.DownloadID,
+		Bindings:     bindings,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
-	if err := s.jobRepository.Save(job); err != nil {
+	save := s.jobRepository.Save
+	if job.Cause == CauseRepair {
+		save = s.jobRepository.SaveDurable
+	}
+	if err := save(job); err != nil {
 		s.jobsMu.Unlock()
 		return nil, err
 	}
@@ -126,6 +145,29 @@ func (s *Service) Jobs() []Job {
 		}
 		return cmp.Compare(left.ID, right.ID)
 	})
+	return jobs
+}
+
+// LibraryFindingJobs snapshots only the repair identity and current state needed
+// by the findings view, avoiding deep copies of historical attempts and mutations.
+func (s *Service) LibraryFindingJobs() []Job {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobs := make([]Job, 0)
+	for _, job := range s.jobs {
+		if job.Cause != CauseRepair {
+			continue
+		}
+		job.Attempts = nil
+		job.Mutations = nil
+		job.ReplacementDownloadIDs = nil
+		job.Bindings = slices.Clone(job.Bindings)
+		for index := range job.Bindings {
+			job.Bindings[index] = cloneBinding(job.Bindings[index])
+		}
+		jobs = append(jobs, job)
+	}
 	return jobs
 }
 
@@ -213,50 +255,114 @@ func (s *Service) loadJobs(jobs []Job) error {
 }
 
 func (s *Service) run(ctx context.Context) {
-	ticker := time.NewTicker(maintenanceInterval)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcileImportedJobs(ctx)
-			s.maintainJobs()
-			s.signal()
 		case <-s.wake:
-			for {
-				handler := s.currentHandler()
-				if handler == nil {
-					break
-				}
-				job, ok := s.nextJob()
-				if !ok {
-					break
-				}
-				if !s.runJob(ctx, handler, job) {
-					break
-				}
-				if ctx.Err() != nil {
-					return
-				}
+		}
+		for ctx.Err() == nil {
+			handler := s.currentHandler()
+			if handler == nil {
+				break
 			}
+			job, ok := s.nextJob()
+			if !ok {
+				break
+			}
+			// This single dispatcher reserves pacing before launching workers. Claim
+			// the media scope while it is still queued, including during slow preflight.
+			if err := s.reserveRepairDispatch(job); err != nil {
+				break
+			}
+			s.jobsMu.Lock()
+			s.executing[job.ID] = job
+			s.jobsMu.Unlock()
+			s.wg.Go(func() {
+				defer func() {
+					s.jobsMu.Lock()
+					delete(s.executing, job.ID)
+					s.jobsMu.Unlock()
+					s.signal()
+				}()
+				s.dispatchJob(ctx, handler, job)
+			})
 		}
 	}
 }
 
+func (s *Service) dispatchJob(ctx context.Context, handler Handler, job Job) {
+	if job.Status == StatusRetryScheduled {
+		if !s.prepareRecoveryRetry(ctx, job) {
+			return
+		}
+		current, found := s.Job(job.ID)
+		if !found || current.Status != StatusRetryScheduled {
+			return
+		}
+		job = current
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, executionTimeout)
+	covered, checkErr := s.completeQueuedLibraryJob(checkCtx, job)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if checkErr != nil {
+		status := job.Status
+		if errors.Is(checkErr, ErrBindingUnsafe) {
+			status = StatusFailed
+		}
+		_, _ = s.updateJobDurable(job.ID, status, func(job *Job) {
+			job.LastError = checkErr.Error()
+			if status == StatusQueued || status == StatusRetryScheduled {
+				job.RetryAt = s.now().Add(retryMaxDelay)
+			}
+		})
+		return
+	}
+	if !covered {
+		s.runJob(ctx, handler, job)
+	}
+}
+
 func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
+	if job.Paused && job.newDispatch() {
+		return false
+	}
 	deadline := job.reconciliationDeadline()
+	if job.Status == StatusRetryScheduled {
+		deadline = time.Time{}
+	}
 	if !deadline.IsZero() && !s.now().Before(deadline) {
 		return s.stopReconciliation(job.ID, errors.New("Arr reconciliation deadline expired"))
 	}
-	started, err := s.updateJob(job.ID, StatusResolving, func(job *Job) {
-		job.RetryAt = time.Time{}
+	started, err := s.updateObservedJob(job, StatusResolving, func(current *Job) {
+		current.RetryAt = time.Time{}
+		if job.Status == StatusRetryScheduled {
+			current.Attempts = append(current.Attempts, RecoveryAttempt{Number: len(current.Attempts) + 1, StartedAt: attemptStart(job), EndedAt: s.now(), Outcome: current.RetryReason, Mutations: cloneJob(job).Mutations})
+			if job.RetryReason != "rate_limited" {
+				current.RetryCount++
+			}
+			current.RetryReason = ""
+			current.Mutations = nil
+			current.SearchCompletedAt = time.Time{}
+			current.AttemptStartedAt = s.now()
+		} else if current.AttemptStartedAt.IsZero() {
+			current.AttemptStartedAt = s.now()
+		}
 	})
 	if err != nil {
 		return false
 	}
 	progress := &serviceJobProgress{service: s, jobID: job.ID}
 	timeout := executionTimeout
+	if policy, err := config.Get().Repair.QueuePolicy(); job.Cause == CauseRepair && err == nil {
+		timeout = policy.SearchTimeout
+	}
 	if !deadline.IsZero() {
 		timeout = min(timeout, deadline.Sub(s.now()))
 	}
@@ -276,6 +382,9 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 	deadline = current.reconciliationDeadline()
 	if err != nil && !deadline.IsZero() && !s.now().Before(deadline) {
 		return s.stopReconciliation(job.ID, fmt.Errorf("Arr reconciliation deadline expired: %w", err))
+	}
+	if limit, ok := errors.AsType[*arr.SearchRateLimitError](err); ok && current.Cause == CauseRepair {
+		return s.deferRateLimitedSearch(current, limit) == nil
 	}
 	if errors.Is(err, arr.ErrMutationOutcomeUnknown) {
 		delay := retryDelay(current, err)
@@ -298,6 +407,13 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 				return s.stopReconciliation(job.ID, err)
 			}
 		}
+		if current.Cause == CauseRepair && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, arr.ErrReleaseSearch) || errors.Is(err, errNoReplacement)) {
+			reason := "search_error"
+			if errors.Is(err, errNoReplacement) {
+				reason = "no_download"
+			}
+			return s.scheduleRecovery(current, reason, err.Error()) == nil
+		}
 		_, updateErr := s.updateJob(job.ID, StatusFailed, func(job *Job) {
 			job.LastError = err.Error()
 			job.RetryAt = time.Time{}
@@ -316,13 +432,44 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 }
 
 func (s *Service) nextJob() (Job, bool) {
+	policy, policyErr := config.Get().Repair.QueuePolicy()
+	s.repairQueueMu.Lock()
+	nextAllowed := s.repairQueueState.NextAllowedAt
+	s.repairQueueMu.Unlock()
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
+	if policyErr != nil || len(s.executing) >= policy.SearchWorkers {
+		return Job{}, false
+	}
+	inFlight := 0
+	for id, claimed := range s.executing {
+		if claimed.Cause == CauseRepair && !s.jobs[id].occupiesSlot() {
+			inFlight++
+		}
+	}
+	for _, job := range s.jobs {
+		if job.Cause == CauseRepair && job.occupiesSlot() {
+			inFlight++
+		}
+	}
+	scopeBlocked := s.scopeGuardsLocked()
 	var next Job
 	found := false
 	for _, id := range s.activeReacquisitions {
 		job, ok := s.jobs[id]
-		if !ok || !job.Status.dispatchable() || job.RetryAt.After(s.now()) {
+		if _, running := s.executing[id]; running {
+			continue
+		}
+		if s.arrs != nil && job.newDispatch() && s.now().Before(s.arrs.SearchRetryAt(job.ArrName)) {
+			continue
+		}
+		if !ok || !job.Status.dispatchable() || job.Paused || job.RetryAt.After(s.now()) {
+			continue
+		}
+		if job.Cause == CauseRepair && job.newDispatch() && (policyErr != nil || policy.Paused || inFlight >= policy.MaxActive || s.now().Before(nextAllowed)) {
+			continue
+		}
+		if job.Cause == CauseRepair && job.newDispatch() && scopeBlocked(job) {
 			continue
 		}
 		if !found || job.UpdatedAt.Before(next.UpdatedAt) {
@@ -347,6 +494,14 @@ func (s *Service) updateJobWithDurability(
 	mutate func(*Job),
 	durable bool,
 ) (Job, error) {
+	return s.updateJobState(id, status, mutate, durable, nil)
+}
+
+func (s *Service) updateObservedJob(job Job, status Status, mutate func(*Job)) (Job, error) {
+	return s.updateJobState(job.ID, status, mutate, true, &job)
+}
+
+func (s *Service) updateJobState(id string, status Status, mutate func(*Job), durable bool, expected *Job) (Job, error) {
 	if !status.valid() {
 		return Job{}, fmt.Errorf("invalid reacquire status %q", status)
 	}
@@ -356,6 +511,9 @@ func (s *Service) updateJobWithDurability(
 	original, ok := s.jobs[id]
 	if !ok {
 		return Job{}, fmt.Errorf("reacquire job %q not found", id)
+	}
+	if expected != nil && (original.Revision != expected.Revision || original.Status != expected.Status || !original.UpdatedAt.Equal(expected.UpdatedAt)) {
+		return Job{}, fmt.Errorf("job changed; refresh and try again")
 	}
 	if original.Status.Terminal() && status != original.Status {
 		return Job{}, fmt.Errorf("reacquire job %q is already %s", id, original.Status)
@@ -372,9 +530,26 @@ func (s *Service) updateJobWithDurability(
 	job.EntryID = original.EntryID
 	job.FileID = original.FileID
 	job.DownloadID = original.DownloadID
-	job.Bindings = cloneJob(original).Bindings
+	if !original.WholeSeasonReplacement && job.WholeSeasonReplacement {
+		if !durable || status != StatusResolving || original.Status != StatusResolving {
+			return Job{}, ErrBindingUnsafe
+		}
+		if err := validateSeasonSnapshot(original, job.Bindings); err != nil {
+			return Job{}, err
+		}
+	} else {
+		job.Bindings = cloneJob(original).Bindings
+	}
+	job.WholeSeasonReplacement = original.WholeSeasonReplacement || job.WholeSeasonReplacement
 	job.CreatedAt = original.CreatedAt
+	if job.PhaseStartedAt.IsZero() {
+		job.PhaseStartedAt = original.UpdatedAt
+	}
+	if status != original.Status {
+		job.PhaseStartedAt = s.now()
+	}
 	job.Status = status
+	job.Revision = original.Revision + 1
 	job.UpdatedAt = s.now()
 	if status != StatusQueued && job.StartedAt.IsZero() {
 		job.StartedAt = job.UpdatedAt
@@ -534,7 +709,7 @@ func (status Status) waiting() bool {
 }
 
 func (status Status) dispatchable() bool {
-	return status == StatusQueued || status == StatusResolving || status == StatusInvalidating || status == StatusBlocklisting || status == StatusSearching
+	return status == StatusRetryScheduled || status == StatusQueued || status == StatusResolving || status == StatusInvalidating || status == StatusBlocklisting || status == StatusSearching
 }
 
 func keyForBinding(binding Binding) jobKey {
@@ -565,7 +740,7 @@ func (s *Service) completeJobFromIndex(job Job) error {
 }
 
 func (s *Service) replacementsForJob(job Job) ([]string, bool) {
-	if len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile {
+	if job.WholeSeasonReplacement || (len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile) {
 		return nil, false
 	}
 	downloads := make(map[string]struct{})
@@ -626,21 +801,27 @@ func replacementCandidate(candidates []Binding, oldDownloadID string, matches fu
 func (s *Service) maintainJobs() {
 	now := s.now()
 	var expire []string
+	var stalled []Job
 	var prune []string
 
 	s.jobsMu.RLock()
 	for id, job := range s.jobs {
 		switch {
-		case job.Status.waiting() && now.Sub(job.UpdatedAt) >= waitingTimeout:
+		case job.Cause == CauseRepair && job.Status.waiting() && now.Sub(phaseStart(job)) >= waitingTimeout:
+			stalled = append(stalled, cloneJob(job))
+		case job.Cause != CauseRepair && job.Status.waiting() && now.Sub(phaseStart(job)) >= waitingTimeout:
 			expire = append(expire, id)
-		case job.Status == StatusFailed && terminalAge(now, job) >= failureRetention:
+		case job.Cause != CauseRepair && job.Status == StatusFailed && terminalAge(now, job) >= failureRetention:
 			prune = append(prune, id)
-		case (job.Status == StatusReady || job.Status == StatusCancelled) && terminalAge(now, job) >= successRetention:
+		case job.Cause != CauseRepair && (job.Status == StatusReady || job.Status == StatusCancelled) && terminalAge(now, job) >= successRetention:
 			prune = append(prune, id)
 		}
 	}
 	s.jobsMu.RUnlock()
 
+	for _, j := range stalled {
+		_ = s.attention(j, "Replacement has not progressed before the recovery deadline; inspect Arr before retrying")
+	}
 	for _, id := range expire {
 		_, _ = s.updateJob(id, StatusFailed, func(job *Job) {
 			job.LastError = "replacement was not imported before the reacquisition timeout"

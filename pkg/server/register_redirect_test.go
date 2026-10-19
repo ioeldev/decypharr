@@ -1,7 +1,6 @@
 package server
 
 import (
-	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,20 +14,6 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		urlBase: "/",
 		logger:  zerolog.Nop(),
-		templates: template.Must(template.ParseFS(
-			content,
-			"templates/layout.html",
-			"templates/setup_layout.html",
-			"templates/index.html",
-			"templates/download.html",
-			"templates/repair.html",
-			"templates/stats.html",
-			"templates/config.html",
-			"templates/browse.html",
-			"templates/login.html",
-			"templates/register.html",
-			"templates/setup.html",
-		)),
 	}
 }
 

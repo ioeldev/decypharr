@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
@@ -78,6 +79,19 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 		}
 	}
 
+	// Snapshot once, durably, before deleting anything. Retries keep the original
+	// file IDs, so newly imported replacements can never become deletion targets.
+	if config.Get().Repair.ReplaceWholeSeason && job.Cause == CauseRepair &&
+		job.Strategy == StrategySeasonPackFirst && !job.WholeSeasonReplacement && len(job.Mutations) == 0 {
+		job, err = handler.snapshotSeason(ctx, instance, job, progress)
+		if err != nil {
+			return err
+		}
+		bindings, err = mutationBindings(job)
+		if err != nil {
+			return err
+		}
+	}
 	if err := progress.Update(StatusInvalidating, nil); err != nil {
 		return err
 	}

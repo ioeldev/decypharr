@@ -296,6 +296,10 @@ func (m *Manager) init() {
 		Hearsay:       m.hearsay,
 	})
 
+	if m.arrService != nil {
+		m.arrService.SetImportVerifier(m.repair.VerifyLibraryRecovery)
+	}
+
 	// Initialize the unified active-download queue after all processors exist.
 	m.initJobQueue()
 }

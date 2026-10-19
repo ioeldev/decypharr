@@ -47,13 +47,17 @@ const (
 )
 
 type RepairRunStats struct {
-	Candidates   int `json:"candidates"`
-	SkippedFresh int `json:"skipped_fresh"`
-	Probed       int `json:"probed"`
-	Healthy      int `json:"healthy"`
-	Broken       int `json:"broken"`
-	Unknown      int `json:"unknown"`
+	Candidates    int `json:"candidates"`
+	SkippedFresh  int `json:"skipped_fresh"`
+	SkippedSeason int `json:"skipped_season,omitempty"`
+	Probed        int `json:"probed"`
+	Healthy       int `json:"healthy"`
+	Broken        int `json:"broken"`
+	Unknown       int `json:"unknown"`
+	// Repaired is retained for API/history compatibility: queued plus restored.
 	Repaired     int `json:"repaired"`
+	Queued       int `json:"queued"`
+	Restored     int `json:"restored"`
 	Cleared      int `json:"cleared,omitempty"`
 	RepairFailed int `json:"repair_failed"`
 }
@@ -217,13 +221,17 @@ type BrokenFile struct {
 
 	// Arr re-acquire payload. Empty when source=managed or when no Arr owns
 	// the file.
-	ArrName    string  `json:"arr_name,omitempty"`
-	ArrKind    ArrKind `json:"arr_kind,omitempty"`
-	MediaID    int     `json:"media_id,omitempty"`
-	EpisodeID  int     `json:"episode_id,omitempty"`
-	ArrFileID  int     `json:"arr_file_id,omitempty"`
-	TargetPath string  `json:"target_path,omitempty"`
-	SourcePath string  `json:"source_path,omitempty"`
+	ArrName        string  `json:"arr_name,omitempty"`
+	ArrKind        ArrKind `json:"arr_kind,omitempty"`
+	MediaID        int     `json:"media_id,omitempty"`
+	EpisodeIDs     []int   `json:"episode_ids,omitempty"`
+	SeasonNumber   int     `json:"season_number,omitempty"`
+	EpisodeID      int     `json:"episode_id,omitempty"`
+	ArrFileID      int     `json:"arr_file_id,omitempty"`
+	TargetPath     string  `json:"target_path,omitempty"`
+	SourcePath     string  `json:"source_path,omitempty"`
+	LibraryAudit   bool    `json:"library_audit,omitempty"`
+	ArrFingerprint string  `json:"arr_fingerprint,omitempty"`
 }
 
 // EntryHealth is the source of truth for repair decisions. It is keyed by
@@ -231,25 +239,31 @@ type BrokenFile struct {
 // updated live during a sweep — once when probing starts, once when it
 // finishes.
 type EntryHealth struct {
-	EntryName     string          `json:"entry_name"`
-	Protocol      config.Protocol `json:"protocol,omitempty"`
-	Status        HealthStatus    `json:"status"`
-	Fingerprint   string          `json:"fingerprint,omitempty"`
-	FileCount     int             `json:"file_count"`
-	BrokenCount   int             `json:"broken_count"`
-	BrokenFiles   []BrokenFile    `json:"broken_files,omitempty"`
-	FailureReason string          `json:"failure_reason,omitempty"`
+	EntryName   string `json:"entry_name"`
+	DisplayName string `json:"display_name,omitempty"`
+	// LibraryFile retains identity for rechecks, even after a successful read.
+	LibraryPaused  bool            `json:"library_paused,omitempty"`
+	LibraryRemoved bool            `json:"library_removed,omitempty"`
+	LibraryFile    *BrokenFile     `json:"library_file,omitempty"`
+	Protocol       config.Protocol `json:"protocol,omitempty"`
+	Status         HealthStatus    `json:"status"`
+	Fingerprint    string          `json:"fingerprint,omitempty"`
+	FileCount      int             `json:"file_count"`
+	BrokenCount    int             `json:"broken_count"`
+	BrokenFiles    []BrokenFile    `json:"broken_files,omitempty"`
+	FailureReason  string          `json:"failure_reason,omitempty"`
 
 	Dirty       bool   `json:"dirty"`
 	DirtyReason string `json:"dirty_reason,omitempty"`
 
-	LastCheckedAt  time.Time    `json:"last_checked_at"`
-	LastOKAt       time.Time    `json:"last_ok_at"`
-	LastFailedAt   time.Time    `json:"last_failed_at"`
-	LastRepairAt   time.Time    `json:"last_repair_at"`
-	NextCheckDueAt time.Time    `json:"next_check_due_at"`
-	ActiveRunID    string       `json:"active_run_id,omitempty"`
-	PreviousStatus HealthStatus `json:"previous_status,omitempty"`
+	StatusChangedAt time.Time    `json:"status_changed_at,omitempty"`
+	LastCheckedAt   time.Time    `json:"last_checked_at"`
+	LastOKAt        time.Time    `json:"last_ok_at"`
+	LastFailedAt    time.Time    `json:"last_failed_at"`
+	LastRepairAt    time.Time    `json:"last_repair_at"`
+	NextCheckDueAt  time.Time    `json:"next_check_due_at"`
+	ActiveRunID     string       `json:"active_run_id,omitempty"`
+	PreviousStatus  HealthStatus `json:"previous_status,omitempty"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 }

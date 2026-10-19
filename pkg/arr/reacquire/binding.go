@@ -121,6 +121,7 @@ func (strategy Strategy) valid() bool {
 type Status string
 
 const (
+	StatusRetryScheduled     Status = "retry_scheduled"
 	StatusQueued             Status = "queued"
 	StatusResolving          Status = "resolving"
 	StatusInvalidating       Status = "invalidating"
@@ -141,7 +142,7 @@ func (status Status) Terminal() bool {
 
 func (status Status) valid() bool {
 	switch status {
-	case StatusQueued,
+	case StatusRetryScheduled, StatusQueued,
 		StatusResolving,
 		StatusInvalidating,
 		StatusBlocklisting,
@@ -160,10 +161,11 @@ func (status Status) valid() bool {
 }
 
 type Request struct {
-	EntryID  string   `json:"entryId"`
-	FileID   string   `json:"fileId"`
-	Cause    Cause    `json:"cause"`
-	Strategy Strategy `json:"strategy,omitempty"`
+	LibraryAudit bool     `json:"-"`
+	EntryID      string   `json:"entryId"`
+	FileID       string   `json:"fileId"`
+	Cause        Cause    `json:"cause"`
+	Strategy     Strategy `json:"strategy,omitempty"`
 }
 
 func (request Request) validate() error {
@@ -181,7 +183,31 @@ func (request Request) validate() error {
 	}
 }
 
+type RecoveryAttempt struct {
+	Number    int        `json:"number"`
+	StartedAt time.Time  `json:"startedAt"`
+	EndedAt   time.Time  `json:"endedAt"`
+	Outcome   string     `json:"outcome"`
+	Mutations []Mutation `json:"mutations,omitempty"`
+}
+
 type Job struct {
+	Revision                 uint64            `json:"revision,omitempty"`
+	LastObservationAttemptAt time.Time         `json:"lastObservationAttemptAt,omitzero"`
+	DownloadRemaining        float64           `json:"downloadRemaining,omitempty"`
+	DownloadProgressAt       time.Time         `json:"downloadProgressAt,omitzero"`
+	WholeSeasonReplacement   bool              `json:"wholeSeasonReplacement,omitempty"`
+	LibraryAudit             bool              `json:"libraryAudit,omitempty"`
+	Paused                   bool              `json:"paused,omitempty"`
+	RetryCount               int               `json:"retryCount,omitempty"`
+	RetryReason              string            `json:"retryReason,omitempty"`
+	AttemptStartedAt         time.Time         `json:"attemptStartedAt,omitzero"`
+	SearchCompletedAt        time.Time         `json:"searchCompletedAt,omitzero"`
+	PhaseStartedAt           time.Time         `json:"phaseStartedAt,omitzero"`
+	LastObservedAt           time.Time         `json:"lastObservedAt,omitzero"`
+	ObservationError         string            `json:"observationError,omitempty"`
+	Attempts                 []RecoveryAttempt `json:"attempts,omitempty"`
+
 	ID                     string     `json:"id"`
 	Status                 Status     `json:"status"`
 	Cause                  Cause      `json:"cause"`
@@ -204,6 +230,13 @@ type Job struct {
 }
 
 func cloneJob(job Job) Job {
+	job.Attempts = slices.Clone(job.Attempts)
+	for i := range job.Attempts {
+		job.Attempts[i].Mutations = slices.Clone(job.Attempts[i].Mutations)
+		for j := range job.Attempts[i].Mutations {
+			job.Attempts[i].Mutations[j] = cloneMutation(job.Attempts[i].Mutations[j])
+		}
+	}
 	bindings := job.Bindings
 	job.Bindings = make([]Binding, len(bindings))
 	for i, binding := range bindings {

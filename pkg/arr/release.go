@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	stdjson "encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	json "github.com/bytedance/sonic"
 )
+
+var ErrReleaseSearch = errors.New("release search failed")
 
 type Release struct {
 	GUID                string             `json:"guid"`
@@ -95,20 +99,37 @@ func (s *Service) GrabRelease(ctx context.Context, name string, release Release)
 }
 
 func (s *Service) releases(ctx context.Context, instance Arr, query url.Values) ([]Release, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if until := s.SearchRetryAt(instance.Name); time.Now().Before(until) {
+		return nil, &SearchRateLimitError{ArrName: instance.Name, RetryAt: until}
+	}
+	// Release discovery is a potentially slow indexer search, not a cheap read.
+	// One request uses the search context's deadline instead of six 30s retries.
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+	}
 	var payloads []stdjson.RawMessage
-	resp, err := s.get(ctx, instance, "api/v3/release?"+query.Encode(), &payloads)
+	resp, err := s.do(ctx, s.search, instance, http.MethodGet, "api/v3/release?"+query.Encode(), nil, decodeResponseInto(&payloads))
 	if err != nil {
-		return nil, fmt.Errorf("search releases: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrReleaseSearch, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, s.rateLimitSearch(instance, resp.Header.Get("Retry-After"))
 	}
 	if err := expectStatus(resp, http.StatusOK); err != nil {
-		return nil, fmt.Errorf("search releases: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrReleaseSearch, err)
 	}
+	s.searchSucceeded(instance)
 
 	releases := make([]Release, 0, len(payloads))
 	for _, payload := range payloads {
 		var release Release
 		if err := json.Unmarshal(payload, &release); err != nil {
-			return nil, fmt.Errorf("decode release: %w", err)
+			return nil, fmt.Errorf("%w: decode release: %w", ErrReleaseSearch, err)
 		}
 		// The Arr only accepts a release it produced, verbatim.
 		release.Payload = bytes.Clone(payload)

@@ -307,6 +307,12 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 		return
 	}
 
+	// Status checks can deliver the first file list after an uncached torrent
+	// finishes. Persist it (and its provider links) before preparing the import.
+	if debridTorrent.Status == debridTypes.TorrentStatusDownloaded {
+		applyDebridTorrentToEntry(entry, debridTorrent)
+	}
+
 	// Update entry progress
 	entry.Progress = debridTorrent.Progress / 100.0
 	entry.Speed = debridTorrent.Speed
@@ -392,6 +398,9 @@ func (m *Manager) processNewTorrent(torrent *storage.Entry, debridTorrent *debri
 }
 
 func applyDebridTorrentToEntry(torrent *storage.Entry, debridTorrent *debridTypes.Torrent) {
+	if torrent.Files == nil {
+		torrent.Files = make(map[string]*storage.File)
+	}
 	_ = torrent.AddTorrentProvider(debridTorrent)
 	torrent.ActiveProvider = debridTorrent.Debrid
 	torrent.Bytes = debridTorrent.GetSize()
@@ -408,6 +417,10 @@ func applyDebridTorrentToEntry(torrent *storage.Entry, debridTorrent *debridType
 			Deleted:   file.Deleted,
 			InfoHash:  torrent.InfoHash,
 			AddedOn:   torrent.AddedOn,
+		}
+		// A metadata refresh must not resurrect a file explicitly removed locally.
+		if previous := torrent.Files[file.Name]; previous != nil && previous.Deleted {
+			tFile.Deleted = true
 		}
 		torrent.Files[file.Name] = tFile
 	}

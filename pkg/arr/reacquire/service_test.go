@@ -422,7 +422,7 @@ func TestWaitingTransitionFindsExistingCompleteEpisodeReplacement(t *testing.T) 
 	}
 }
 
-func TestWaitingJobExpiresAndReleasesDeduplicationKey(t *testing.T) {
+func TestWaitingRepairQuarantinesAndRetainsDeduplicationKey(t *testing.T) {
 	handler := &waitingReacquireHandler{called: make(chan string, 2)}
 	service, err := NewService(ServiceOptions{Directory: t.TempDir(), Handler: handler})
 	if err != nil {
@@ -457,13 +457,13 @@ func TestWaitingJobExpiresAndReleasesDeduplicationKey(t *testing.T) {
 
 	service.now = func() time.Time { return base.Add(waitingTimeout + time.Minute) }
 	service.maintainJobs()
-	waitForJobStatus(t, service, first.ID, StatusFailed)
+	waitForJobStatus(t, service, first.ID, StatusNeedsAttention)
 	second, err := service.Reacquire(Request{EntryID: "entry", FileID: "file", Cause: CauseRepair})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.ID == first.ID {
-		t.Fatal("expired job retained the active deduplication key")
+	if second.ID != first.ID {
+		t.Fatal("quarantined repair lost its deduplication key")
 	}
 }
 
