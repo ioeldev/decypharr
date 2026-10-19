@@ -16,11 +16,17 @@ import SettingsList from './settings-list';
 
 type SettingsFieldProps = {
   field: SettingsFieldDefinition;
+  path?: string;
   value: JsonValue | undefined;
   onChange: (value: JsonValue) => void;
 };
 
-export default function SettingsField({ field, value, onChange }: SettingsFieldProps) {
+export default function SettingsField({
+  field,
+  value,
+  onChange,
+  path = field.name,
+}: SettingsFieldProps) {
   const id = useId();
   const descriptionId = field.description ? `${id}-description` : undefined;
 
@@ -28,12 +34,17 @@ export default function SettingsField({ field, value, onChange }: SettingsFieldP
     return (
       <FieldSet className="rounded-xl border p-4">
         <FieldLegend>{field.label}</FieldLegend>
-        <SettingsObject fields={field.fields} value={objectValue(value)} onChange={onChange} />
+        <SettingsObject
+          path={path}
+          fields={field.fields}
+          value={objectValue(value)}
+          onChange={onChange}
+        />
       </FieldSet>
     );
 
   if (field.kind === 'list')
-    return <SettingsList field={field} value={arrayValue(value)} onChange={onChange} />;
+    return <SettingsList path={path} field={field} value={arrayValue(value)} onChange={onChange} />;
 
   if (field.kind === 'boolean' && !field.isOptional)
     return (

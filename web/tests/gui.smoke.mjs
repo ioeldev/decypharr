@@ -1,3 +1,4 @@
+import { checkSettingsVisibility } from './settings-visibility.smoke.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
@@ -223,6 +224,7 @@ try {
     const saved = JSON.parse(mutations.at(-1).body);
     assert.equal(saved.api_token, undefined);
     assert.equal(saved.download_folder, '/unsaved-draft');
+    await checkSettingsVisibility(page, mutations);
     await page.setViewportSize({ width: 375, height: 812 });
     const settingsTabs = page.getByRole('tab');
     for (const tab of await settingsTabs.all()) {

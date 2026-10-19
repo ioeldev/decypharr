@@ -6,6 +6,7 @@ import SettingsField from './settings-field';
 
 export default function SettingsList({
   field,
+  path,
   value,
   onChange,
 }: {
@@ -15,6 +16,7 @@ export default function SettingsList({
       kind: 'list';
     }
   >;
+  path: string;
   value: JsonValue[];
   onChange: (value: JsonValue[]) => void;
 }) {
@@ -65,6 +67,7 @@ export default function SettingsList({
           </div>
           <SettingsField
             field={field.item}
+            path={path}
             value={entry}
             onChange={(nextValue) =>
               onChange(value.map((current, position) => (position === index ? nextValue : current)))
