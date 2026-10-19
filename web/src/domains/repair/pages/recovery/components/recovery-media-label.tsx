@@ -8,8 +8,8 @@ export default function RecoveryMediaLabel({ binding }: { binding: JsonObject })
   const details = useQuery(recoveryMediaQuery(binding));
   const media = recoveryMedia(binding, details.data);
   return (
-    <div>
-      <div className="font-bold">
+    <div className="min-w-0">
+      <div className="truncate font-medium" title={media.label}>
         {media.path ? (
           <a
             href={appUrl(media.path)}
@@ -23,7 +23,6 @@ export default function RecoveryMediaLabel({ binding }: { binding: JsonObject })
           media.label
         )}
       </div>
-      <p className="text-xs opacity-60 break-all">{media.filename}</p>
     </div>
   );
 }

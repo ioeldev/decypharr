@@ -1,12 +1,14 @@
-import { Button } from '@/shared/components/ui/button';
-import { useState } from 'react';
+import RowActions from '@/shared/components/row-actions';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/shared/components/ui/dropdown-menu';
+import RepairListRow from '../../../components/repair-list-row';
+import RepairStatus from '../../../components/repair-status';
+import RepairDiagnostics from '../../../components/repair-diagnostics';
 import { repairKeys } from '../../../repair.queries';
 import { Link } from 'react-router-dom';
 import { appUrl, request } from '../../../../../shared/api/client';
 import { stringValue, numberValue } from '../../../../../shared/api/json-response';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import ActionMessage from '../../../../../shared/components/action-message';
-import RecordDetails from '../../../../../shared/components/record-details';
 import { findingChangedAt, type LibraryFinding as Finding } from '../library-findings';
 
 export default function LibraryFinding({
@@ -16,7 +18,6 @@ export default function LibraryFinding({
   finding: Finding;
   maxRetries: number;
 }) {
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const queryClient = useQueryClient();
   const action = useMutation({
     mutationFn: changeFinding,
@@ -69,86 +70,91 @@ export default function LibraryFinding({
     });
     return 'Action requested.';
   }
+  const jobStatus = stringValue(job?.status);
+  const status = isPaused ? 'suspended' : jobStatus || stringValue(health?.status) || 'pending';
+  const reason =
+    health?.status === 'healthy'
+      ? 'Readable'
+      : stringValue(health?.failure_reason) || 'Awaiting a library read';
+  const changedAt = findingChangedAt(finding);
+
   return (
-    <article className="p-4 border-b border-border flex flex-col gap-2">
-      <h3 className="font-semibold">{finding.label}</h3>
-      <p>
-        {stringValue(file.arr_name)} ·{' '}
-        {health?.status === 'healthy'
-          ? 'Readable'
-          : stringValue(health?.failure_reason) || 'Awaiting a library read'}{' '}
-        · {stringValue(job?.status).replaceAll('_', ' ') || 'Not queued'}
-      </p>
+    <RepairListRow
+      label={finding.label}
+      title={
+        <h3 className="truncate" title={finding.label}>
+          {finding.label}
+        </h3>
+      }
+      description={
+        <>
+          {stringValue(file.arr_name)} · {stringValue(job?.lastError) || reason}
+        </>
+      }
+      status={<RepairStatus status={status} />}
+      actions={
+        <RowActions label={finding.label} disabled={action.isPending}>
+          {health ? (
+            <DropdownMenuItem onSelect={() => action.mutate('recheck')}>Recheck</DropdownMenuItem>
+          ) : null}
+          {canRetry ? (
+            <DropdownMenuItem onSelect={() => action.mutate('retry')}>Retry Now</DropdownMenuItem>
+          ) : null}
+          {canRepair ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                if (confirm('Queue replacement through Sonarr/Radarr for this broken file?'))
+                  action.mutate('repair');
+              }}
+            >
+              Repair
+            </DropdownMenuItem>
+          ) : null}
+          {health || isActive ? (
+            <DropdownMenuItem onSelect={() => action.mutate(isPaused ? 'resume' : 'pause')}>
+              {isPaused ? 'Resume' : 'Suspend'}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
+          {job?.status === 'needs_attention' ? (
+            <DropdownMenuItem asChild>
+              <Link to="/repair/reacquire">Review Recovery</Link>
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem asChild>
+            <a href={appUrl(`api/repair/library/media?${link}`)} target="_blank" rel="noreferrer">
+              Open in Arr
+            </a>
+          </DropdownMenuItem>
+        </RowActions>
+      }
+      feedback={<ActionMessage state={action} />}
+    >
+      <p className="break-words">{reason}</p>
+      {job?.lastError ? (
+        <p className="break-words text-destructive">{stringValue(job.lastError)}</p>
+      ) : null}
       {job?.status === 'ready' && finding.category !== 'resolved' ? (
         <p>Imported; read validation pending.</p>
       ) : null}
-      {job?.lastError ? <p className="text-destructive">{stringValue(job.lastError)}</p> : null}
-      <p className="text-sm">
-        Changed:{' '}
-        {findingChangedAt(finding) ? new Date(findingChangedAt(finding)).toLocaleString() : '—'} ·
-        Attempts: {numberValue(job?.retryCount)}/{maxRetries} · Next attempt:{' '}
-        {stringValue(job?.retryAt) || '—'}
-      </p>
-      <div className="flex gap-2 flex-wrap">
-        {health ? (
-          <Button
-            disabled={action.isPending}
-            onClick={() => action.mutate('recheck')}
-            variant="secondary"
-            size="sm"
-          >
-            Recheck
-          </Button>
-        ) : null}
-        {canRetry ? (
-          <Button
-            disabled={action.isPending}
-            onClick={() => action.mutate('retry')}
-            variant="secondary"
-            size="sm"
-          >
-            Retry Now
-          </Button>
-        ) : null}
-        {canRepair ? (
-          <Button
-            disabled={action.isPending}
-            onClick={() => {
-              if (confirm('Queue replacement through Sonarr/Radarr for this broken file?'))
-                action.mutate('repair');
-            }}
-            variant="secondary"
-            size="sm"
-          >
-            Repair
-          </Button>
-        ) : null}
-        {health || isActive ? (
-          <Button
-            disabled={action.isPending}
-            onClick={() => action.mutate(isPaused ? 'resume' : 'pause')}
-            variant="secondary"
-            size="sm"
-          >
-            {isPaused ? 'Resume' : 'Suspend'}
-          </Button>
-        ) : null}
-        {job?.status === 'needs_attention' ? (
-          <Button asChild variant="secondary">
-            <Link to="/repair/reacquire">Review Recovery</Link>
-          </Button>
-        ) : null}
-        <Button asChild variant="secondary">
-          <a href={appUrl(`api/repair/library/media?${link}`)} target="_blank" rel="noreferrer">
-            Open in Arr
-          </a>
-        </Button>
-      </div>
-      <details onToggle={(event) => setIsDetailsOpen(event.currentTarget.open)}>
-        <summary className="cursor-pointer">Details</summary>
-        {isDetailsOpen ? <RecordDetails value={{ health, job, file }} /> : null}
-      </details>
-      <ActionMessage state={action} />
-    </article>
+      <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+        <div>
+          <dt className="text-muted-foreground">Changed</dt>
+          <dd>{changedAt ? new Date(changedAt).toLocaleString() : '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Attempts</dt>
+          <dd>
+            {numberValue(job?.retryCount)}/{maxRetries}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Next attempt</dt>
+          <dd>{stringValue(job?.retryAt) || '—'}</dd>
+        </div>
+      </dl>
+      <p className="break-all text-xs text-muted-foreground">{stringValue(file.source_path)}</p>
+      <RepairDiagnostics value={{ health, job, file }} />
+    </RepairListRow>
   );
 }

@@ -20,13 +20,13 @@ export default function RunControls() {
   if (config.isError && !config.data) return <p role="alert">{config.error.message}</p>;
   const settings = config.data;
   return (
-    <Card className="flex flex-col gap-4">
+    <Card>
       <CardHeader>
         <CardTitle>
-          <h2 className="text-xl">Run a health check</h2>
+          <h2>Run a health check</h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-4">
+      <CardContent className="flex min-w-0 flex-col gap-3">
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -48,41 +48,39 @@ export default function RunControls() {
           }}
           className="flex flex-col gap-3"
         >
-          <FieldGroup>
-            <div className="flex gap-5 flex-wrap">
-              <FormField
-                label="Audit imported library files"
-                type="checkbox"
-                name="library_audit"
-                defaultChecked={Boolean(settings.library_audit)}
-              />
-              <FormField
-                label="Include recently checked entries"
-                type="checkbox"
-                name="ignore_last_checked"
-              />
-              <FormField
-                label="Automatically repair"
-                type="checkbox"
-                name="auto_repair"
-                defaultChecked={Boolean(settings.auto_repair)}
-              />
-              <FormField
-                label="Verify NZB content"
-                type="checkbox"
-                name="verify_content"
-                defaultChecked={Boolean(settings.verify_content)}
-              />
-              <Field>
-                <FieldLabel htmlFor="field-protocol">Protocol</FieldLabel>
-                <NativeSelect id="field-protocol" name="protocol">
-                  <NativeSelectOption value="all">All</NativeSelectOption>
-                  <NativeSelectOption value="torrent">Torrent</NativeSelectOption>
-                  <NativeSelectOption value="nzb">Usenet</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-            </div>
-            <Button disabled={action.isPending} variant="default">
+          <FieldGroup className="grid grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <FormField
+              label="Audit imported library files"
+              type="checkbox"
+              name="library_audit"
+              defaultChecked={Boolean(settings.library_audit)}
+            />
+            <FormField
+              label="Include recently checked entries"
+              type="checkbox"
+              name="ignore_last_checked"
+            />
+            <FormField
+              label="Automatically repair"
+              type="checkbox"
+              name="auto_repair"
+              defaultChecked={Boolean(settings.auto_repair)}
+            />
+            <FormField
+              label="Verify NZB content"
+              type="checkbox"
+              name="verify_content"
+              defaultChecked={Boolean(settings.verify_content)}
+            />
+            <Field>
+              <FieldLabel htmlFor="field-protocol">Protocol</FieldLabel>
+              <NativeSelect id="field-protocol" name="protocol">
+                <NativeSelectOption value="all">All</NativeSelectOption>
+                <NativeSelectOption value="torrent">Torrent</NativeSelectOption>
+                <NativeSelectOption value="nzb">Usenet</NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            <Button disabled={action.isPending} variant="default" className="self-end">
               Run Now
             </Button>
           </FieldGroup>

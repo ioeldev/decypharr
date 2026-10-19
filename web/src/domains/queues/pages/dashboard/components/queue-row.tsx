@@ -1,7 +1,8 @@
 import { Checkbox } from '@/shared/components/ui/checkbox';
 import { TableCell, TableRow } from '@/shared/components/ui/table';
 import { Progress } from '@/shared/components/ui/progress';
-import { Button } from '@/shared/components/ui/button';
+import RowActions from '@/shared/components/row-actions';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/shared/components/ui/dropdown-menu';
 import type { QueueEntry } from '../../../queues.types';
 
 interface QueueRowProps {
@@ -33,12 +34,17 @@ export default function QueueRow({
         />
       </TableCell>
       <TableCell>
-        <div className="font-medium">{entry.name}</div>
+        <div className="max-w-48 truncate font-medium sm:max-w-80" title={entry.name}>
+          {entry.name}
+        </div>
         <small>{entry.info_hash.slice(0, 8)}…</small>
       </TableCell>
       <TableCell>{formatBytes(entry.size ?? 0)}</TableCell>
       <TableCell>
-        <Progress value={progressPercent} className="w-20" /> {progressPercent}%
+        <div className="flex items-center gap-2">
+          <Progress value={progressPercent} className="w-16" />
+          <span className="text-xs tabular-nums">{progressPercent}%</span>
+        </div>
       </TableCell>
       <TableCell>
         {speedBytesPerSecond > 0 ? `${formatBytes(speedBytesPerSecond)}/s` : '—'}
@@ -49,25 +55,19 @@ export default function QueueRow({
       <TableCell>{entry.num_seeds ?? 0}</TableCell>
       <TableCell>{entry.state === 'pausedUP' ? 'Completed' : entry.state || 'Unknown'}</TableCell>
       <TableCell>
-        <div className="flex gap-1 flex-wrap">
-          <Button disabled={isBusy} onClick={() => onCopy(entry.name)} variant="ghost" size="sm">
-            Copy Name
-          </Button>
-          <Button
-            disabled={isBusy}
-            onClick={() => onCopy(`magnet:?xt=urn:btih:${entry.info_hash}`)}
-            variant="ghost"
-            size="sm"
-          >
+        <RowActions label={entry.name} disabled={isBusy}>
+          <DropdownMenuItem onSelect={() => onCopy(entry.name)}>Copy Name</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onCopy(`magnet:?xt=urn:btih:${entry.info_hash}`)}>
             Copy Magnet
-          </Button>
-          <Button disabled={isBusy} onClick={() => onDelete(false)} variant="destructive" size="sm">
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onSelect={() => onDelete(false)}>
             Delete
-          </Button>
-          <Button disabled={isBusy} onClick={() => onDelete(true)} variant="destructive" size="sm">
+          </DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onSelect={() => onDelete(true)}>
             Remove From Provider
-          </Button>
-        </div>
+          </DropdownMenuItem>
+        </RowActions>
       </TableCell>
     </TableRow>
   );

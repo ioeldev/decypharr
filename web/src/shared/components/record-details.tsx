@@ -24,7 +24,7 @@ export default function RecordDetails({ value }: { value: JsonValue }) {
           <dt className="font-medium">
             {name.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2')}
           </dt>
-          <dd>
+          <dd className="min-w-0 break-words">
             <RecordDetails value={entry} />
           </dd>
         </div>

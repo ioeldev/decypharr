@@ -9,7 +9,7 @@ import RepairMaintenance from './components/repair-maintenance';
 
 export default function AuditPage() {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Repair"
         description="Check library health, repair entries, and track recovery."
@@ -20,7 +20,14 @@ export default function AuditPage() {
       <RecoveryQueue />
       <BrokenEntries />
       <RunHistory />
-      <RepairMaintenance />
+      <details className="rounded-lg border bg-card">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Repair maintenance
+        </summary>
+        <div className="border-t">
+          <RepairMaintenance />
+        </div>
+      </details>
     </div>
   );
 }

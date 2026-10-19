@@ -21,7 +21,7 @@ try {
     '/api/browse/': { entries: [], total: 0, total_pages: 1 },
     '/api/repair/config': { enabled: true },
     '/api/repair/status': { enabled: true, health_counts: {}, next_run_at: '' },
-    '/api/repair/health': [],
+    '/api/repair/health': [{ entry_name: 'broken-entry', display_name: 'Broken media file with a long name', failure_reason: 'Provider no longer has a readable copy', status: 'broken', last_checked_at: '2026-10-18T12:00:00Z' }],
     '/api/repair/runs': [{ id: 'run', started_at: '2026-10-18', status: 'completed', source: 'fix-broken:all', stats: { repaired: 1668 } }],
     '/api/arr/reacquire/queue': { paused: false, queued: 3, in_flight: 2, max_active: 10, searching: 1, search_workers: 3, total: 7, status_counts: { ready: 2, failed: 1 }, search_cooldowns: { shows: '2026-10-18T12:00:00Z' } },
     '/api/arr/reacquire/jobs': [{ id: 'job', status: 'needs_attention', arrName: 'shows', retryReason: 'no_download', createdAt: '2026-10-18', bindings: [{ arrName: 'shows', arrType: 'sonarr', seriesId: 9, episodeIds: [100], libraryPath: '/tv/Show/Season 1/Show.S01E01.mkv' }] }],
@@ -99,16 +99,61 @@ try {
         assert.equal(await progress.getAttribute('aria-valuenow'), '42');
         await page.getByRole('checkbox', { name: 'Select all visible entries', exact: true }).check();
         await page.getByRole('button', { name: 'Delete Selected (1)', exact: true }).waitFor();
+        const rowMenu = page.getByRole('button', { name: /^Actions for A long media title/ });
+        await rowMenu.click();
+        await page.getByRole('menuitem', { name: 'Copy Name', exact: true }).waitFor();
+        await page.getByRole('menuitem', { name: 'Remove From Provider', exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        assert.equal(await rowMenu.evaluate(button => document.activeElement === button), true);
+        assert.equal(await page.getByRole('menu').count(), 0);
         await page.setViewportSize({ width: 375, height: 812 });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'populated queue: mobile overflow');
         await page.setViewportSize({ width: 1440, height: 1000 });
         queueFixture.torrents = [];
         queueFixture.total = 0;
       }
-      if (path === '/repair') await page.locator('summary').filter({ hasText: 'Submission complete' }).waitFor();
+      if (path === '/browse') {
+        const listingFixture = fixtures['/api/browse/'];
+        listingFixture.entries = [{ name: 'A media file '.repeat(15), path: '/media/file.mkv', size: 1073741824, mod_time: '2026-10-18', is_dir: false, can_delete: true, info_hash: 'browse-test' }];
+        listingFixture.total = 1;
+        await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+        const fileActions = page.getByRole('button', { name: /^Actions for A media file/ });
+        await fileActions.click();
+        await page.getByRole('menuitem', { name: 'Download file', exact: true }).waitFor();
+        await page.getByRole('menuitem', { name: 'Delete', exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        listingFixture.entries = [];
+        listingFixture.total = 0;
+      }
+      if (path === '/repair') {
+        await page.locator('article [data-slot=badge]').filter({ hasText: 'Submission complete' }).waitFor();
+        await page.getByRole('button', { name: 'Actions for Broken media file with a long name', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Recheck', exact: true }).click();
+        await page.getByText('Recheck requested.', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Details for run run', exact: true }).click();
+        await page.getByText('Technical details', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Details for run run', exact: true }).click();
+      }
       if (path === '/repair/library') {
         await page.getByText('10000 findings · up to 50 per page', { exact: true }).waitFor();
         assert.equal(await page.locator('article').count(), 50);
+        await page.locator('summary').filter({ hasText: 'Season 1' }).click();
+        const finding = page.locator('article').first();
+        const detailsButton = finding.getByRole('button', { name: /^Details for/ });
+        assert.equal(await detailsButton.getAttribute('aria-expanded'), 'false');
+        await detailsButton.click();
+        await finding.getByText('Technical details', { exact: true }).waitFor();
+        for (const width of [320, 375, 768, 1440]) {
+          await page.setViewportSize({ width, height: 1000 });
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `expanded finding: overflow at ${width}px`);
+        }
+        assert.equal(await finding.locator('dl dl').count(), 0, 'technical records stay unmounted until requested');
+        await finding.getByRole('button', { name: /^Actions for/ }).click();
+        await page.getByRole('menuitem', { name: 'Recheck', exact: true }).click();
+        await finding.getByText('Action requested.', { exact: true }).waitFor();
+        await detailsButton.click();
+        assert.ok((await page.locator('article').nth(1).boundingBox()).height < 80, 'collapsed findings stay compact');
+        await page.screenshot({ path: `/tmp/decypharr-finding-rows-${prefix ? 'base' : 'root'}.png`, fullPage: true });
         const nextPage = page.waitForRequest(request => request.url().includes('/api/repair/library?') && new URL(request.url()).searchParams.get('page') === '2');
         await page.getByRole('button', { name: 'Next', exact: true }).click();
         await nextPage;
@@ -122,7 +167,17 @@ try {
       }
       if (path === '/repair/reacquire') {
         await page.getByRole('link', { name: 'Canonical Show · S02E03' }).waitFor();
-        await page.getByRole('button', { name: 'Retry Now', exact: true }).click();
+        const jobDetails = page.getByRole('button', { name: 'Details for job job', exact: true });
+        assert.equal(await jobDetails.getAttribute('aria-expanded'), 'false');
+        await jobDetails.click();
+        await page.getByText('Technical details', { exact: true }).waitFor();
+        await page.setViewportSize({ width: 320, height: 812 });
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'expanded recovery: mobile overflow');
+        await jobDetails.click();
+        await page.screenshot({ path: `/tmp/decypharr-recovery-mobile-${prefix ? 'base' : 'root'}.png`, fullPage: true });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.getByRole('button', { name: 'Actions for job job', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Retry Now', exact: true }).click();
         await page.locator('article [data-slot=badge]').filter({ hasText: /^queued$/ }).waitFor({ timeout: 2000 });
         await page.getByText('4 queued.', { exact: false }).waitFor({ timeout: 2000 });
       }
@@ -198,7 +253,7 @@ try {
     await page.close();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: all 11 routes, both themes, 320/375/768/1440px layouts, mobile drawer, persisted theme, all settings sections, setup steps, populated queue selection/progress, root/prefix deployments, submissions and redirects; no browser errors.');
+  console.log('PASS: all 11 routes, both themes, 320/375/768/1440px layouts, mobile drawer, persisted theme, all settings sections, setup steps, populated queue selection/progress, row action menus and keyboard focus, lazy repair details, root/prefix deployments, submissions and redirects; no browser errors.');
 } finally {
   await browser.close();
   server.stop(true);

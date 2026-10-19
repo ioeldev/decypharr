@@ -3,7 +3,6 @@ import LoadingState from '@/shared/components/loading-state';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { NativeSelectOption, NativeSelect } from '@/shared/components/ui/native-select';
-import { Card, CardContent } from '@/shared/components/ui/card';
 import { libraryFindingsQuery } from '../../repair.queries';
 import { readPreference, savePreference } from '../../../../shared/browser/preferences';
 import { useEffect, useState } from 'react';
@@ -97,34 +96,40 @@ export default function LibraryPage() {
       ) : null}
       {snapshot.isPending ? <LoadingState label="Loading findings…" /> : null}
       {snapshot.isError && !snapshot.data ? <p role="alert">{snapshot.error.message}</p> : null}
-      {[...groups].map(([key, group]) => {
-        const first = group[0];
-        if (!first) return null;
-        const rows = group.map((finding, index) => (
-          <LibraryFinding
-            key={
-              stringValue(finding.health?.entry_name) || `${stringValue(finding.job?.id)}-${index}`
-            }
-            finding={finding}
-            maxRetries={snapshot.data?.maxRetries ?? 3}
-          />
-        ));
-        if (first.file.arr_kind !== 'sonarr')
+      <div
+        aria-label="Library findings"
+        className="min-w-0 divide-y overflow-hidden rounded-lg border bg-card"
+      >
+        {[...groups].map(([key, group]) => {
+          const first = group[0];
+          if (!first) return null;
+          const rows = group.map((finding, index) => (
+            <LibraryFinding
+              key={
+                stringValue(finding.health?.entry_name) ||
+                `${stringValue(finding.job?.id)}-${index}`
+              }
+              finding={finding}
+              maxRetries={snapshot.data?.maxRetries ?? 3}
+            />
+          ));
+          if (first.file.arr_kind !== 'sonarr')
+            return (
+              <div key={key} className="min-w-0">
+                {rows}
+              </div>
+            );
           return (
-            <Card key={key} className="">
-              <CardContent className="flex min-w-0 flex-col gap-4">{rows}</CardContent>
-            </Card>
+            <details key={key} className="group/season min-w-0">
+              <summary className="cursor-pointer truncate px-3 py-2 text-sm font-medium">
+                {seriesLabel(first)} · Season {first.season ?? 'unknown'} · {group.length} findings
+                on this page
+              </summary>
+              <div className="border-t">{rows}</div>
+            </details>
           );
-        return (
-          <details key={key} className="rounded-xl border bg-card">
-            <summary className="cursor-pointer p-4 font-medium">
-              {seriesLabel(first)} · Season {first.season ?? 'unknown'} · {group.length} findings on
-              this page
-            </summary>
-            <div className="px-4 pb-4">{rows}</div>
-          </details>
-        );
-      })}
+        })}
+      </div>
       <p>{snapshot.data?.total ?? 0} findings · up to 50 per page</p>
       <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
     </div>

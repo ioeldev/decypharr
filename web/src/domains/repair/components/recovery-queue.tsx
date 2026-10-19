@@ -1,6 +1,7 @@
+import { Badge } from '@/shared/components/ui/badge';
 import LoadingState from '@/shared/components/loading-state';
 import { Button } from '@/shared/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardAction } from '@/shared/components/ui/card';
 import { repairKeys, recoveryQueueQuery } from '../repair.queries';
 import { request } from '../../../shared/api/client';
 import { objectValue, numberValue, stringValue } from '../../../shared/api/json-response';
@@ -18,14 +19,34 @@ export default function RecoveryQueue() {
   if (queue.isError && !queue.data) return <p role="alert">{queue.error.message}</p>;
   const status = queue.data;
   const counts = objectValue(status.status_counts);
+  const cooldowns = Object.entries(objectValue(status.search_cooldowns));
   return (
     <Card className="flex flex-col gap-3">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-xl">Recovery queue</h2>
+          <h2 className="text-base">Recovery queue</h2>
         </CardTitle>
+        <CardAction>
+          {' '}
+          <Button
+            disabled={action.isPending}
+            onClick={() =>
+              action.mutate(async () => {
+                await request('api/arr/reacquire/queue', {
+                  method: 'POST',
+                  json: { paused: !status.paused },
+                });
+                return status.paused ? 'Recovery queue resumed.' : 'Recovery queue paused.';
+              })
+            }
+            variant="secondary"
+            size="sm"
+          >
+            {status.paused ? 'Resume new recoveries' : 'Pause new recoveries'}
+          </Button>
+        </CardAction>
       </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-4">
+      <CardContent className="flex min-w-0 flex-col gap-2">
         {queue.isError ? (
           <p role="alert">{queue.error.message} Showing the last received data.</p>
         ) : null}
@@ -36,42 +57,28 @@ export default function RecoveryQueue() {
           {numberValue(status.search_workers)} search workers.
         </p>
         {status.next_allowed_at ? <p>Next start: {stringValue(status.next_allowed_at)}</p> : null}
-        {Object.entries(objectValue(status.search_cooldowns)).map(([name, until]) => (
-          <p key={name}>
-            Search rate limit: {name} until {stringValue(until)}
-          </p>
-        ))}
+        {cooldowns.length > 0 ? (
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer">Search cooldowns ({cooldowns.length})</summary>
+            {cooldowns.map(([name, until]) => (
+              <p key={name} className="mt-1">
+                {name} until {stringValue(until)}
+              </p>
+            ))}
+          </details>
+        ) : null}
         {status.error ? <p role="alert">{stringValue(status.error)}</p> : null}
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           {Object.entries(counts).map(([name, count]) => (
-            <div key={name} className="rounded-lg border p-4 flex-1 min-w-32 bg-muted/50 w-auto">
-              <div className="text-sm text-muted-foreground">{name.replaceAll('_', ' ')}</div>
-              <div className="font-semibold tracking-tight tabular-nums text-xl">
-                {numberValue(count)}
-              </div>
-            </div>
+            <Badge key={name} variant="secondary">
+              {name.replaceAll('_', ' ')} <span className="tabular-nums">{numberValue(count)}</span>
+            </Badge>
           ))}
+          <span className="text-xs text-muted-foreground">
+            {numberValue(counts.ready)} of {numberValue(status.total)} retained jobs imported.
+          </span>
         </div>
-        <p>
-          {numberValue(counts.ready)} of {numberValue(status.total)} retained jobs imported.
-        </p>
-        <Button
-          disabled={action.isPending}
-          onClick={() =>
-            action.mutate(async () => {
-              await request('api/arr/reacquire/queue', {
-                method: 'POST',
-                json: { paused: !status.paused },
-              });
-              return status.paused ? 'Recovery queue resumed.' : 'Recovery queue paused.';
-            })
-          }
-          variant="secondary"
-          size="sm"
-          className="w-fit"
-        >
-          {status.paused ? 'Resume new recoveries' : 'Pause new recoveries'}
-        </Button>
+
         <ActionMessage state={action} />
       </CardContent>
     </Card>

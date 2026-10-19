@@ -127,22 +127,38 @@ export default function RecoveryPage() {
       ) : null}
       {jobs.isPending ? <LoadingState label="Loading jobs…" /> : null}
       {jobs.isError && !jobs.data ? <p role="alert">{jobs.error.message}</p> : null}
-      {visible.map((job) => (
-        <RecoveryJob
-          key={stringValue(job.id)}
-          job={job}
-          isSelected={selected.has(stringValue(job.id))}
-          onSelect={(isSelected) => {
-            const next = new Set(selected);
-            if (isSelected) next.add(stringValue(job.id));
-            if (!isSelected) next.delete(stringValue(job.id));
-            setSelected(next);
-          }}
-        />
-      ))}
+      <div className="min-w-0 overflow-hidden rounded-lg border bg-card">
+        {visible.map((job) => (
+          <RecoveryJob
+            key={stringValue(job.id)}
+            job={job}
+            isSelected={selected.has(stringValue(job.id))}
+            onSelect={(isSelected) => {
+              const next = new Set(selected);
+              if (isSelected) next.add(stringValue(job.id));
+              if (!isSelected) next.delete(stringValue(job.id));
+              setSelected(next);
+            }}
+          />
+        ))}
+      </div>
       <Pagination page={currentPage} totalPages={totalPages} onChange={setPage} />
-      <ManualRecovery />
-      <BindingIndex />
+      <details className="rounded-lg border bg-card">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Request a replacement manually
+        </summary>
+        <div className="border-t">
+          <ManualRecovery />
+        </div>
+      </details>
+      <details className="rounded-lg border bg-card">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          Arr binding index
+        </summary>
+        <div className="border-t">
+          <BindingIndex />
+        </div>
+      </details>
     </div>
   );
 }

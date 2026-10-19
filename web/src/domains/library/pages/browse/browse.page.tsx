@@ -26,6 +26,7 @@ import ActionMessage from '../../../../shared/components/action-message';
 import Pagination from '../../../../shared/components/pagination';
 import { downloadUrl, type BrowseEntry } from '../../library.api';
 import EntryHealth from './components/entry-health';
+import BrowseEntryActions from './components/browse-entry-actions';
 
 export default function BrowsePage() {
   const [parameters, setParameters] = useSearchParams();
@@ -231,15 +232,17 @@ export default function BrowsePage() {
                         {entry.is_dir ? (
                           <Button
                             onClick={() => changeParameter('path', entry.path)}
-                            variant="secondary"
-                            className="text-primary underline-offset-4 hover:underline"
+                            variant="link"
+                            className="max-w-48 justify-start truncate p-0 sm:max-w-80"
+                            title={entry.name}
                           >
-                            📁 {entry.name}
+                            <span className="truncate">📁 {entry.name}</span>
                           </Button>
                         ) : (
                           <a
                             href={downloadUrl(entry)}
-                            className="text-primary underline-offset-4 hover:underline"
+                            className="block max-w-48 truncate text-primary underline-offset-4 hover:underline sm:max-w-80"
+                            title={entry.name}
                           >
                             {entry.name}
                           </a>
@@ -252,16 +255,12 @@ export default function BrowsePage() {
                         {entry.kind === 'entry' ? <EntryHealth name={entry.name} /> : '—'}
                       </TableCell>
                       <TableCell>
-                        {entry.can_delete ? (
-                          <Button
-                            disabled={action.isPending}
-                            onClick={() => deleteEntries([entry])}
-                            variant="destructive"
-                            size="sm"
-                          >
-                            Delete
-                          </Button>
-                        ) : null}
+                        <BrowseEntryActions
+                          entry={entry}
+                          isDeleting={action.isPending}
+                          onDelete={() => deleteEntries([entry])}
+                          onOpenDirectory={() => changeParameter('path', entry.path)}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

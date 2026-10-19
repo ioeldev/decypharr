@@ -7,7 +7,7 @@ import { request } from '../../../../../shared/api/client';
 import { stringValue } from '../../../../../shared/api/json-response';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ActionMessage from '../../../../../shared/components/action-message';
-import RecordDetails from '../../../../../shared/components/record-details';
+import RunHistoryRow from './run-history-row';
 import { presentRun } from '../run-presentation';
 
 export default function RunHistory() {
@@ -20,13 +20,13 @@ export default function RunHistory() {
   if (history.isPending) return <LoadingState label="Loading run history…" />;
   if (history.isError && !history.data) return <p role="alert">{history.error.message}</p>;
   return (
-    <Card className="flex flex-col gap-4">
+    <Card>
       <CardHeader>
         <CardTitle>
-          <h2 className="text-xl">Run History</h2>
+          <h2>Run History</h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-4">
+      <CardContent className="flex min-w-0 flex-col gap-3">
         {history.isError ? (
           <p role="alert">{history.error.message} Showing the last received data.</p>
         ) : null}
@@ -56,20 +56,11 @@ export default function RunHistory() {
             </EmptyHeader>
           </Empty>
         ) : (
-          history.data.map(presentRun).map((run, index) => (
-            <details
-              key={stringValue(run.id) || index}
-              className="rounded-xl border bg-card bg-muted/50"
-            >
-              <summary className="cursor-pointer p-4 font-medium">
-                {stringValue(run.started_at)} · {stringValue(run.status)} ·{' '}
-                {stringValue(run.source)}
-              </summary>
-              <div className="px-4 pb-4">
-                <RecordDetails value={run} />
-              </div>
-            </details>
-          ))
+          <div className="min-w-0 overflow-hidden rounded-lg border">
+            {history.data.map(presentRun).map((run, index) => (
+              <RunHistoryRow key={stringValue(run.id) || index} run={run} />
+            ))}
+          </div>
         )}
         <ActionMessage state={action} />
       </CardContent>
