@@ -24,7 +24,7 @@ try {
     '/api/repair/status': { enabled: true, health_counts: {}, next_run_at: '' },
     '/api/repair/health': [{ entry_name: 'broken-entry', display_name: 'Broken media file with a long name', failure_reason: 'Provider no longer has a readable copy', status: 'broken', last_checked_at: '2026-10-18T12:00:00Z' }],
     '/api/repair/runs': [{ id: 'run', started_at: '2026-10-18', status: 'completed', source: 'fix-broken:all', stats: { repaired: 1668 } }],
-    '/api/arr/reacquire/queue': { paused: false, queued: 3, in_flight: 2, max_active: 10, searching: 1, search_workers: 3, total: 7, status_counts: { ready: 2, failed: 1 }, search_cooldowns: { shows: '2026-10-18T12:00:00Z' } },
+    '/api/arr/reacquire/queue': { paused: false, queued: 3, in_flight: 2, max_active: 10, searching: 1, search_workers: 3, total: 8, status_counts: { queued: 3, waiting_for_download: 1, waiting_for_import: 1, ready: 2, failed: 1 }, search_cooldowns: { shows: '2026-10-18T12:00:00Z' } },
     '/api/arr/reacquire/jobs': [{ id: 'job', status: 'needs_attention', arrName: 'shows', retryReason: 'no_download', createdAt: '2026-10-18', bindings: [{ arrName: 'shows', arrType: 'sonarr', seriesId: 9, episodeIds: [100], libraryPath: '/tv/Show/Season 1/Show.S01E01.mkv' }] }],
     '/api/arr/media/details': { title: 'Canonical Show', episodes: [{ id: 100, seasonNumber: 2, episodeNumber: 3 }] },
     '/api/arr/bindings': [], '/api/arr/index': [], '/api/arrs': [],
@@ -34,8 +34,10 @@ try {
   for (const prefix of ['', '/base']) {
     fixtures['/api/arr/reacquire/jobs'][0].status = 'needs_attention';
     fixtures['/api/arr/reacquire/queue'].queued = 3;
+    fixtures['/api/arr/reacquire/queue'].paused = false;
     configuration.download_folder = '/downloads';
     let delayConfiguration = false;
+    let rejectHealthCheck = true;
     let releaseConfiguration;
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.setDefaultTimeout(5000);
@@ -51,6 +53,11 @@ try {
       if (request.method() !== 'GET') {
         mutations.push({ path, body: request.postData(), method: request.method() });
         if (path === '/api/config') Object.assign(configuration, request.postDataJSON());
+        if (path === '/api/arr/reacquire/queue') Object.assign(fixtures[path], request.postDataJSON());
+        if (path === '/api/repair/run' && rejectHealthCheck) {
+          rejectHealthCheck = false;
+          return route.fulfill({ status: 503, json: { error: 'Health check temporarily unavailable' } });
+        }
         if (path === '/api/arr/reacquire/jobs/job/retry') {
           fixtures['/api/arr/reacquire/jobs'][0].status = 'queued';
           fixtures['/api/arr/reacquire/queue'].queued = 4;
@@ -66,6 +73,7 @@ try {
         const findings = Array.from({ length: search ? 1 : 50 }, (_, index) => ({
           ...fixture.findings[0], label: search || `Example file ${pageNumber}-${index}`,
           health: { ...fixture.findings[0].health, entry_name: `incident-${pageNumber}-${index}` },
+          file: index === 49 ? { ...fixture.findings[0].file, arr_name: 'movies', arr_kind: 'radarr', media_id: 10 } : fixture.findings[0].file,
         }));
         return route.fulfill({ json: { ...fixture, findings, page: pageNumber, total: search ? 1 : 10000 } });
       }
@@ -127,10 +135,32 @@ try {
         listingFixture.total = 0;
       }
       if (path === '/repair') {
-        await page.locator('article [data-slot=badge]').filter({ hasText: 'Submission complete' }).waitFor();
+        assert.equal(await page.locator('form [name=protocol]').count(), 0, 'health check form stays off the page');
+        await page.getByRole('button', { name: 'Run a health check', exact: true }).click();
+        const healthCheck = page.getByRole('dialog', { name: 'Run a health check' });
+        await healthCheck.getByLabel('Protocol', { exact: true }).selectOption('nzb');
+        await healthCheck.getByLabel('Automatically repair', { exact: true }).check();
+        await page.screenshot({ path: `/tmp/decypharr-health-check-${prefix ? 'base' : 'root'}.png` });
+        await healthCheck.getByRole('button', { name: 'Start health check', exact: true }).click();
+        await healthCheck.getByRole('alert').filter({ hasText: 'Health check temporarily unavailable' }).waitFor();
+        assert.equal(await healthCheck.getByLabel('Protocol', { exact: true }).inputValue(), 'nzb');
+        await healthCheck.getByRole('button', { name: 'Start health check', exact: true }).click();
+        await healthCheck.waitFor({ state: 'hidden' });
+        const startRequest = mutations.filter(mutation => mutation.path === '/api/repair/run').at(-1);
+        assert.equal(JSON.parse(startRequest.body).protocol, 'nzb');
+        assert.equal(JSON.parse(startRequest.body).auto_repair, true);
+        assert.equal(await page.getByRole('heading', { name: 'Run History', exact: true }).count(), 0);
+        assert.equal(await page.getByRole('progressbar', { name: 'Imported recovery jobs' }).getAttribute('aria-valuenow'), '25');
+        await page.getByRole('button', { name: 'Pause', exact: true }).click();
+        await page.getByText('New starts paused', { exact: true }).waitFor();
+        await page.getByText('2 recoveries in progress.', { exact: false }).waitFor();
+        await page.getByRole('button', { name: 'Resume', exact: true }).click();
+        await page.getByText('Recovering', { exact: true }).waitFor();
         await page.getByRole('button', { name: 'Actions for Broken media file with a long name', exact: true }).click();
         await page.getByRole('menuitem', { name: 'Recheck', exact: true }).click();
         await page.getByText('Recheck requested.', { exact: true }).waitFor();
+        await page.getByRole('tab', { name: 'Run history', exact: true }).click();
+        await page.locator('article [data-slot=badge]').filter({ hasText: 'Submission complete' }).waitFor();
         await page.getByRole('button', { name: 'Details for run run', exact: true }).click();
         await page.getByText('Technical details', { exact: true }).waitFor();
         await page.getByRole('button', { name: 'Details for run run', exact: true }).click();
@@ -138,7 +168,11 @@ try {
       if (path === '/repair/library') {
         await page.getByText('10000 findings · up to 50 per page', { exact: true }).waitFor();
         assert.equal(await page.locator('article').count(), 50);
-        await page.locator('summary').filter({ hasText: 'Season 1' }).click();
+        assert.equal(await page.locator('summary').filter({ hasText: 'Season 1' }).count(), 0, 'episodes are visible without expanding a season');
+        const movie = page.getByRole('region', { name: 'Example file 1-49', exact: true });
+        await movie.getByRole('button', { name: 'Details for Example file 1-49', exact: true }).click();
+        await movie.getByText('Technical details', { exact: true }).waitFor();
+        await movie.getByRole('button', { name: 'Details for Example file 1-49', exact: true }).click();
         const finding = page.locator('article').first();
         const detailsButton = finding.getByRole('button', { name: /^Details for/ });
         assert.equal(await detailsButton.getAttribute('aria-expanded'), 'false');
@@ -180,7 +214,7 @@ try {
         await page.getByRole('button', { name: 'Actions for job job', exact: true }).click();
         await page.getByRole('menuitem', { name: 'Retry Now', exact: true }).click();
         await page.locator('article [data-slot=badge]').filter({ hasText: /^queued$/ }).waitFor({ timeout: 2000 });
-        await page.getByText('4 queued.', { exact: false }).waitFor({ timeout: 2000 });
+        await page.getByLabel('Recovery stages').locator('div').filter({ has: page.getByText('Queued', { exact: true }) }).getByText('4', { exact: true }).waitFor({ timeout: 2000 });
       }
     }
     await page.setViewportSize({ width: 375, height: 812 });

@@ -1,3 +1,5 @@
+import { Film, Tv } from 'lucide-react';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/shared/components/ui/empty';
 import PageHeader from '@/shared/components/page-header';
 import LoadingState from '@/shared/components/loading-state';
 import { Button } from '@/shared/components/ui/button';
@@ -58,6 +60,7 @@ export default function LibraryPage() {
           Refresh
         </Button>
         <Input
+          className="min-w-0 sm:max-w-sm"
           aria-label="Search findings"
           value={query}
           onChange={(event) => {
@@ -96,10 +99,15 @@ export default function LibraryPage() {
       ) : null}
       {snapshot.isPending ? <LoadingState label="Loading findings…" /> : null}
       {snapshot.isError && !snapshot.data ? <p role="alert">{snapshot.error.message}</p> : null}
-      <div
-        aria-label="Library findings"
-        className="min-w-0 divide-y overflow-hidden rounded-lg border bg-card"
-      >
+      <div aria-label="Library findings" className="flex min-w-0 flex-col gap-4">
+        {snapshot.data?.findings.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No findings</EmptyTitle>
+              <EmptyDescription>Try a different search or status filter.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : null}
         {[...groups].map(([key, group]) => {
           const first = group[0];
           if (!first) return null;
@@ -113,20 +121,30 @@ export default function LibraryPage() {
               maxRetries={snapshot.data?.maxRetries ?? 3}
             />
           ));
-          if (first.file.arr_kind !== 'sonarr')
-            return (
-              <div key={key} className="min-w-0">
-                {rows}
-              </div>
-            );
+          const isSeries = first.file.arr_kind === 'sonarr';
+          const groupLabel = isSeries ? seriesLabel(first) : first.label;
           return (
-            <details key={key} className="group/season min-w-0">
-              <summary className="cursor-pointer truncate px-3 py-2 text-sm font-medium">
-                {seriesLabel(first)} · Season {first.season ?? 'unknown'} · {group.length} findings
-                on this page
-              </summary>
-              <div className="border-t">{rows}</div>
-            </details>
+            <section
+              key={key}
+              aria-label={groupLabel}
+              className="min-w-0 overflow-hidden rounded-lg border bg-card"
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-2 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {isSeries ? (
+                  <Tv className="size-4 shrink-0" />
+                ) : (
+                  <Film className="size-4 shrink-0" />
+                )}
+                <span className="min-w-0 truncate font-medium text-foreground">{groupLabel}</span>
+                <span>{stringValue(first.file.arr_name)}</span>
+                {isSeries ? (
+                  <span>
+                    Season {first.season ?? 'unknown'} · {group.length} on this page
+                  </span>
+                ) : null}
+              </div>
+              {rows}
+            </section>
           );
         })}
       </div>

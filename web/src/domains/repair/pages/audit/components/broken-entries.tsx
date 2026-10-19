@@ -1,12 +1,20 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Empty, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+} from '@/shared/components/ui/card';
 import LoadingState from '@/shared/components/loading-state';
 import Pagination from '@/shared/components/pagination';
 import { stringValue } from '@/shared/api/json-response';
 import { brokenEntriesQuery } from '../../../repair.queries';
 import BrokenEntry from './broken-entry';
+import FixBrokenEntries from './fix-broken-entries';
 
 export default function BrokenEntries() {
   const entries = useQuery(brokenEntriesQuery());
@@ -25,6 +33,14 @@ export default function BrokenEntries() {
         <CardTitle>
           <h2>Broken Entries ({entries.data.length})</h2>
         </CardTitle>
+        <CardDescription>
+          Entries that failed a health check and may need a replacement.
+        </CardDescription>
+        {entries.data.length > 0 ? (
+          <CardAction className="col-start-1 row-start-3 justify-self-start pt-2 sm:col-start-2 sm:row-start-1 sm:justify-self-end sm:pt-0">
+            <FixBrokenEntries />
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-3">
         {entries.isError ? (

@@ -1,122 +1,36 @@
-import LoadingState from '@/shared/components/loading-state';
-import { FieldGroup, Field, FieldLabel } from '@/shared/components/ui/field';
-import { NativeSelectOption, NativeSelect } from '@/shared/components/ui/native-select';
+import { useState } from 'react';
+import { ScanLine } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
-import { repairKeys, repairConfigQuery } from '../../../repair.queries';
-import { request } from '../../../../../shared/api/client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import FormField from '../../../../../shared/components/form-field';
-import ActionMessage from '../../../../../shared/components/action-message';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/shared/components/ui/sheet';
+import HealthCheckForm from './health-check-form';
 
 export default function RunControls() {
-  const config = useQuery(repairConfigQuery());
-  const queryClient = useQueryClient();
-  const action = useMutation({
-    mutationFn: (operation: () => Promise<string>) => operation(),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: repairKeys.all }),
-  });
-  if (config.isPending) return <LoadingState label="Loading repair configuration…" />;
-  if (config.isError && !config.data) return <p role="alert">{config.error.message}</p>;
-  const settings = config.data;
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          <h2>Run a health check</h2>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-3">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const fields = new FormData(event.currentTarget);
-            action.mutate(async () => {
-              await request('api/repair/run', {
-                method: 'POST',
-                json: {
-                  library_audit: fields.has('library_audit'),
-                  ignore_last_checked: fields.has('ignore_last_checked'),
-                  auto_repair: fields.has('auto_repair'),
-                  unrestrict_link: true,
-                  verify_content: fields.has('verify_content'),
-                  protocol: fields.get('protocol'),
-                },
-              });
-              return 'Health check started.';
-            });
-          }}
-          className="flex flex-col gap-3"
-        >
-          <FieldGroup className="grid grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <FormField
-              label="Audit imported library files"
-              type="checkbox"
-              name="library_audit"
-              defaultChecked={Boolean(settings.library_audit)}
-            />
-            <FormField
-              label="Include recently checked entries"
-              type="checkbox"
-              name="ignore_last_checked"
-            />
-            <FormField
-              label="Automatically repair"
-              type="checkbox"
-              name="auto_repair"
-              defaultChecked={Boolean(settings.auto_repair)}
-            />
-            <FormField
-              label="Verify NZB content"
-              type="checkbox"
-              name="verify_content"
-              defaultChecked={Boolean(settings.verify_content)}
-            />
-            <Field>
-              <FieldLabel htmlFor="field-protocol">Protocol</FieldLabel>
-              <NativeSelect id="field-protocol" name="protocol">
-                <NativeSelectOption value="all">All</NativeSelectOption>
-                <NativeSelectOption value="torrent">Torrent</NativeSelectOption>
-                <NativeSelectOption value="nzb">Usenet</NativeSelectOption>
-              </NativeSelect>
-            </Field>
-            <Button disabled={action.isPending} variant="default" className="self-end">
-              Run Now
-            </Button>
-          </FieldGroup>
-        </form>
-        <div className="flex gap-3 flex-wrap">
-          <Button
-            disabled={action.isPending}
-            onClick={() =>
-              action.mutate(async () => {
-                await request('api/repair/stop', { method: 'POST' });
-                return 'Stop requested.';
-              })
-            }
-            variant="secondary"
-          >
-            Stop Run
-          </Button>
-          <Button
-            disabled={action.isPending}
-            onClick={() => {
-              if (
-                !confirm('Send delete and re-search requests for all broken entries to their Arr?')
-              )
-                return;
-              action.mutate(async () => {
-                await request('api/repair/fix', { method: 'POST', json: {} });
-                return 'Recovery submission started.';
-              });
-            }}
-            variant="secondary"
-          >
-            Fix Broken Entries
-          </Button>
-        </div>
-        <ActionMessage state={action} />
-      </CardContent>
-    </Card>
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+      <SheetTrigger asChild>
+        <Button>
+          <ScanLine data-icon="inline-start" />
+          Run a health check
+        </Button>
+      </SheetTrigger>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>Run a health check</SheetTitle>
+          <SheetDescription>
+            Choose what to check. Follow the run’s progress on the repair page.
+          </SheetDescription>
+        </SheetHeader>
+        <HealthCheckForm onStarted={() => setIsOpen(false)} />
+      </SheetContent>
+    </Sheet>
   );
 }
