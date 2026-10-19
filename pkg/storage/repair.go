@@ -47,12 +47,13 @@ const (
 )
 
 type RepairRunStats struct {
-	Candidates   int `json:"candidates"`
-	SkippedFresh int `json:"skipped_fresh"`
-	Probed       int `json:"probed"`
-	Healthy      int `json:"healthy"`
-	Broken       int `json:"broken"`
-	Unknown      int `json:"unknown"`
+	Candidates    int `json:"candidates"`
+	SkippedFresh  int `json:"skipped_fresh"`
+	SkippedSeason int `json:"skipped_season,omitempty"`
+	Probed        int `json:"probed"`
+	Healthy       int `json:"healthy"`
+	Broken        int `json:"broken"`
+	Unknown       int `json:"unknown"`
 	// Repaired is retained for API/history compatibility: queued plus restored.
 	Repaired     int `json:"repaired"`
 	Queued       int `json:"queued"`

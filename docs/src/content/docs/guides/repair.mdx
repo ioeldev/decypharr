@@ -63,6 +63,18 @@ per-file deadline and no fixed delay between files. Start with a small worker
 count: mount read-ahead can transfer more than the 64 KiB sample. Automatic
 restoration and recovery submission remain serial; Arr recovery dispatch is
 paced separately by the Repair queue settings.
+
+With **Repair Whole Season** enabled (`repair.replace_whole_season: true`), Sonarr
+files are read sequentially within each series/season. After the first confirmed
+broken file, the audit skips the remaining files in that season; other seasons
+and movies continue concurrently. Run history reports these avoided reads as
+`skipped_season`, separately from confirmed broken files. Unread files retain
+their previous health and check timestamps. The confirmed incident is enough for
+auto-repair or **Fix broken** to replace all imported files in that season and
+search for a season pack, with an episode-search fallback covering the whole
+season snapshot. If auto-repair restores the original file, the audit continues
+checking the season. Inconclusive reads do not trigger this shortcut.
+
 The mount must be available before probing starts (the built-in DFS mount must
 also expose its `version.txt` marker). An unavailable library parent directory,
 permission error or other inconclusive I/O result is **unknown**, not repairable.

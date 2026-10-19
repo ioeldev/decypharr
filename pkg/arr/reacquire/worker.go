@@ -84,8 +84,16 @@ func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	if binding.DownloadID != "" {
 		bindings = s.index.ByDownloadID(binding.ArrName, binding.DownloadID)
 	}
-	bindings = slices.DeleteFunc(bindings, func(binding Binding) bool {
-		return !binding.AuthorizesMutation()
+	replaceLibrarySeason := request.LibraryAudit && request.Cause == CauseRepair &&
+		binding.ArrType == arr.Sonarr && config.Get().Repair.ReplaceWholeSeason
+	bindings = slices.DeleteFunc(bindings, func(candidate Binding) bool {
+		if !candidate.AuthorizesMutation() {
+			return true
+		}
+		// Library audits stop at the first broken file in each season. Keep
+		// multi-season downloads scoped to that season so snapshotSeason can
+		// include every imported sibling before replacement.
+		return replaceLibrarySeason && (candidate.SeriesID != binding.SeriesID || candidate.SeasonNumber != binding.SeasonNumber)
 	})
 	if len(bindings) == 0 {
 		bindings = []Binding{binding}

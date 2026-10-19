@@ -367,39 +367,50 @@ func (r *Service) executeLibraryAudit(ctx context.Context, run *storage.RepairRu
 	var repairMu sync.Mutex
 	g, probeCtx := errgroup.WithContext(ctx)
 	g.SetLimit(r.workers())
-	for _, h := range files {
+	for _, group := range groupLibraryAuditFiles(files, r.cfg().ReplaceWholeSeason) {
 		if probeCtx.Err() != nil {
 			break
 		}
 		g.Go(func() error {
-			if probeCtx.Err() != nil {
-				return probeCtx.Err()
-			}
-			result := r.auditOneLibraryFile(probeCtx, h)
-			mu.Lock()
-			names = append(names, h.EntryName)
-			run.Stats.Probed++
-			switch result.status {
-			case storage.HealthHealthy:
-				run.Stats.Healthy++
-			case storage.HealthBroken:
-				run.Stats.Broken++
-			default:
-				run.Stats.Unknown++
-			}
-			r.saveRun(run)
-			mu.Unlock()
-			if result.reason == "library_read_timeout" || result.reason == "library_io_busy" {
-				return fmt.Errorf("%s: audit stopped to avoid accumulating blocked filesystem reads", result.reason)
-			}
-			if autoRepair && h.Status == storage.HealthBroken {
-				// Several files may belong to the same torrent. Preserve serial
-				// restoration/submission while allowing unrelated probes to run.
-				repairMu.Lock()
-				if probeCtx.Err() == nil {
-					r.healBrokenEntry(probeCtx, run, &mu, h)
+			for index, health := range group {
+				if probeCtx.Err() != nil {
+					return probeCtx.Err()
 				}
-				repairMu.Unlock()
+				result := r.auditOneLibraryFile(probeCtx, health)
+				mu.Lock()
+				names = append(names, health.EntryName)
+				run.Stats.Probed++
+				switch result.status {
+				case storage.HealthHealthy:
+					run.Stats.Healthy++
+				case storage.HealthBroken:
+					run.Stats.Broken++
+				default:
+					run.Stats.Unknown++
+				}
+				r.saveRun(run)
+				mu.Unlock()
+				if result.reason == "library_read_timeout" || result.reason == "library_io_busy" {
+					return fmt.Errorf("%s: audit stopped to avoid accumulating blocked filesystem reads", result.reason)
+				}
+				if autoRepair && health.Status == storage.HealthBroken {
+					// Several files may belong to the same torrent. Preserve serial
+					// restoration/submission while allowing unrelated probes to run.
+					repairMu.Lock()
+					if probeCtx.Err() == nil {
+						r.healBrokenEntry(probeCtx, run, &mu, health)
+					}
+					repairMu.Unlock()
+				}
+				if health.Status == storage.HealthBroken && index+1 < len(group) && probeCtx.Err() == nil {
+					// One confirmed incident is enough to replace this season. Leave
+					// unprobed files' health and check timestamps untouched.
+					mu.Lock()
+					run.Stats.SkippedSeason += len(group) - index - 1
+					r.saveRun(run)
+					mu.Unlock()
+					break
+				}
 			}
 			return nil
 		})
@@ -457,4 +468,36 @@ func (r *Service) restoreLibraryFile(ctx context.Context, broken storage.BrokenF
 		}
 	}
 	return false, nil
+}
+
+// A worker reads each season sequentially so no sibling probe can start after a
+// confirmed failure. Unrelated seasons and movies keep using separate workers.
+func groupLibraryAuditFiles(files []*storage.EntryHealth, replaceWholeSeason bool) [][]*storage.EntryHealth {
+	type seasonKey struct {
+		arrName        string
+		arrFingerprint string
+		seriesID       int
+		seasonNumber   int
+	}
+
+	var groups [][]*storage.EntryHealth
+	seasonGroups := make(map[seasonKey]int)
+	for _, health := range files {
+		file := health.LibraryFile
+		if !replaceWholeSeason || file == nil || file.ArrKind != storage.ArrKindSonarr ||
+			file.ArrName == "" || file.MediaID <= 0 || file.SeasonNumber < 0 || len(file.EpisodeIDs) == 0 {
+			groups = append(groups, []*storage.EntryHealth{health})
+			continue
+		}
+
+		key := seasonKey{file.ArrName, file.ArrFingerprint, file.MediaID, file.SeasonNumber}
+		if index, exists := seasonGroups[key]; exists {
+			groups[index] = append(groups[index], health)
+			continue
+		}
+
+		seasonGroups[key] = len(groups)
+		groups = append(groups, []*storage.EntryHealth{health})
+	}
+	return groups
 }

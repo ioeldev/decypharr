@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
@@ -56,5 +57,70 @@ func TestUnindexedLibraryEpisodeUsesSeasonPackPolicy(t *testing.T) {
 	}
 	if next, ok := service.nextJob(); !ok || next.ID != second.ID {
 		t.Fatal("queued orphan did not resume after the season recovered")
+	}
+}
+
+func TestWholeSeasonLibraryRepairScopesMultiSeasonDownloads(t *testing.T) {
+	for _, replaceWholeSeason := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replace_whole_season=%v", replaceWholeSeason), func(t *testing.T) {
+			configureArrHTTPTest(t)
+			if _, err := config.Update(func(settings *config.Config) error {
+				settings.Repair.ReplaceWholeSeason = replaceWholeSeason
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			instance := arr.Arr{Name: "shows", Type: arr.Sonarr, Host: "http://unused.test", Token: "test"}
+			registry := arr.New()
+			registry.AddOrUpdate(instance)
+			service, err := NewService(ServiceOptions{Directory: t.TempDir(), Arrs: registry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = service.Close() })
+			if err := service.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			for index := range 4 {
+				binding := Binding{
+					ArrName: instance.Name, ArrType: arr.Sonarr, ArrInstanceFingerprint: instance.Fingerprint(),
+					EntryID: "multi-season", EntryFileID: fmt.Sprint(index), ArrFileID: index + 1,
+					LibraryPath: fmt.Sprintf("/tv/%d.mkv", index), DownloadID: "download",
+					SeriesID: 7, SeasonNumber: 2, EpisodeIDs: []int{index + 41}, Confidence: ConfidenceExactPath,
+				}
+				if index == 2 {
+					binding.SeasonNumber = 3
+				}
+				if index == 3 {
+					binding.SeriesID = 8
+				}
+				if err := service.UpsertBinding(binding); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			job, err := service.ReacquireLibraryFile(t.Context(), LibraryRequest{
+				ArrName: instance.Name, ArrFileID: 1, LibraryPath: "/tv/0.mkv", Cause: CauseRepair,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBindings := 4
+			if replaceWholeSeason {
+				wantBindings = 2
+			}
+			if job.Strategy != StrategySeasonPackFirst || !job.LibraryAudit || len(job.Bindings) != wantBindings {
+				t.Fatalf("unexpected library repair: %+v", job)
+			}
+			if !replaceWholeSeason {
+				return
+			}
+			for _, binding := range job.Bindings {
+				if binding.SeriesID != 7 || binding.SeasonNumber != 2 {
+					t.Fatalf("unrelated season included: %+v", binding)
+				}
+			}
+		})
 	}
 }
