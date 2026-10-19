@@ -38,7 +38,7 @@ export default function DownloadPage() {
   if (config.isError && !config.data) return <p role="alert">{config.error.message}</p>;
   const settings = config.data;
   return (
-    <Card className="flex flex-col gap-6">
+    <Card className="flex flex-col gap-4">
       <CardHeader>
         <CardTitle>
           <h1 className="text-2xl font-bold">Add Downloads</h1>
@@ -66,10 +66,10 @@ export default function DownloadPage() {
               input.files = transfer.files;
             }
           }}
-          className="flex flex-col gap-6"
+          className="flex flex-col gap-4"
         >
           <FieldGroup>
-            <FieldGroup className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FieldGroup className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field>
                 <FieldLabel htmlFor="field-magnet-links-or-torrent-urls">
                   Magnet links or torrent URLs
@@ -78,7 +78,7 @@ export default function DownloadPage() {
                   id="field-magnet-links-or-torrent-urls"
                   name="urls"
                   defaultValue={new URLSearchParams(location.search).get('magnet') ?? ''}
-                  className="w-full h-32"
+                  className="w-full h-24"
                 />
                 <Input
                   aria-label="Torrent files"
@@ -90,7 +90,7 @@ export default function DownloadPage() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="field-nzb-urls">NZB URLs</FieldLabel>
-                <Textarea id="field-nzb-urls" name="nzbURLs" className="w-full h-32" />
+                <Textarea id="field-nzb-urls" name="nzbURLs" className="w-full h-24" />
                 <Input aria-label="NZB files" type="file" name="nzbFiles" accept=".nzb" multiple />
               </Field>
             </FieldGroup>

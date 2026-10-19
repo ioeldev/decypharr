@@ -29,7 +29,7 @@ export default function FormField({ label, description, onCheckedChange, ...inpu
           onCheckedChange={(checked) => onCheckedChange?.(checked === true)}
         />
       ) : null}
-      <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-1.5">
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         {isCheckbox ? null : (
           <Input

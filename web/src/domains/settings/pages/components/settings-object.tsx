@@ -13,7 +13,7 @@ export default function SettingsObject({
   onChange: (value: JsonObject) => void;
 }) {
   return (
-    <FieldGroup className="grid grid-cols-1 items-center gap-5 md:grid-cols-2">
+    <FieldGroup className="grid grid-cols-1 items-center gap-3 md:grid-cols-2">
       {fields.map((field) => (
         <div
           key={field.name}

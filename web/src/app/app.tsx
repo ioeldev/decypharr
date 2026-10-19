@@ -26,7 +26,7 @@ export default function App() {
         </a>
         <Navigation />
         <SidebarInset className="min-w-0">
-          <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4 md:px-8">
+          <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4 md:px-5">
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-5" />
             <span className="text-sm text-muted-foreground">Workspace</span>
@@ -36,7 +36,7 @@ export default function App() {
           <div
             id="main-content"
             tabIndex={-1}
-            className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 p-4 md:p-8"
+            className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 p-3 md:p-5"
             aria-busy={navigation.state !== 'idle'}
           >
             <Outlet />

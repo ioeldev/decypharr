@@ -49,7 +49,7 @@ export default function Navigation() {
   }
   return (
     <Sidebar>
-      <SidebarHeader className="gap-4 p-5">
+      <SidebarHeader className="gap-2 p-4">
         <Link
           className="flex items-center gap-3 font-semibold tracking-tight"
           to="/"
@@ -71,7 +71,7 @@ export default function Navigation() {
                   <SidebarMenuButton
                     asChild
                     isActive={path === '/' ? pathname === path : pathname.startsWith(path)}
-                    size="lg"
+                    size="default"
                   >
                     <NavLink to={path} end={path === '/'} onClick={() => setOpenMobile(false)}>
                       <Icon />
