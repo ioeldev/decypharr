@@ -125,6 +125,30 @@ Content-Type: application/json
 }
 ```
 
+## Daily library audits
+
+For a daily full read audit, enable these repair settings:
+
+```json
+{
+  "enabled": true,
+  "schedule": "0 3 * * *",
+  "library_audit": true,
+  "scheduled_full_audit": true,
+  "auto_repair": true
+}
+```
+
+The schedule uses the server timezone. `scheduled_full_audit` includes recently
+healthy files even when `recheck_interval` is longer than a day: debrid cache
+removal can break a previously working link without changing its path. Recovery
+continues independently between audits, including while the audit schedule is
+disabled. Existing recovery jobs retain their media/season guards, so a new audit
+does not authorize a second simultaneous recovery for the same media.
+
+A daily sample read reduces the time a broken link can remain undetected. It does
+not guarantee continuous playback availability or validate an entire media file.
+
 ## Repair dispatch queue
 
 **Fix broken** and auto-repair enqueue durable Arr recovery jobs. Completing the
@@ -168,6 +192,32 @@ checks for a late download/import. Safe local search errors use shorter delays
 receipts and are never blindly replayed. After the configured automatic retries,
 the job remains visible for manual attention. **Retry now** makes a safe retry
 eligible without bypassing dispatch limits.
+
+### Confirmed cache rejections
+
+With uncached downloads disabled for an Arr, the download client can explicitly
+reject a release with `torrent_not_cached`. Sonarr/Radarr may wrap that structured
+error in a server-error response. Recovery preserves the response and recognizes
+this exact rejection, rather than treating it as an uncertain successful grab.
+
+The rejected release and its receipt are saved durably before trying the next
+eligible release. On restart, already rejected candidates are skipped within that
+attempt. If the candidates are exhausted, the job enters `retry_scheduled` with
+reason `cache_miss`, freeing its active slot. It uses `queue_retry_delays` and
+continues at the last configured interval after that list is exhausted. Each new
+attempt can reconsider releases because provider cache availability can change.
+The media/season reservation remains with this retry, preventing sibling jobs
+from issuing duplicate searches.
+
+Transport failures, truncated responses, generic server errors and missing grab
+history do not prove a cache rejection. They retain the existing reconciliation
+and attention behavior. Previously blocked jobs are not automatically cancelled;
+their remote actions must still be checked before acknowledgement.
+
+This version persists a new `rejected` mutation state. Before upgrading, preserve
+both configuration and a consistent app-data snapshot. An older version may not
+read these new records, so rollback requires the matching state snapshot as well
+as the older image/configuration.
 
 ### Library repair tracking
 

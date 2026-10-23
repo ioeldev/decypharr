@@ -360,7 +360,9 @@ func (s *Service) scheduleRecovery(j Job, reason, message string) error {
 		return err
 	}
 	status := StatusRetryScheduled
-	if j.RetryCount >= len(policy.RetryDelays) {
+	// Cache eviction is not a permanent failure: keep checking at the final
+	// configured interval, without holding an active worker or download slot.
+	if j.RetryCount >= len(policy.RetryDelays) && reason != "cache_miss" {
 		status = StatusNeedsAttention
 	}
 	_, err = s.updateObservedJob(j, status, func(current *Job) {
@@ -370,7 +372,7 @@ func (s *Service) scheduleRecovery(j Job, reason, message string) error {
 		current.LastObservationAttemptAt = s.now()
 		current.ObservationError = ""
 		if status == StatusRetryScheduled {
-			delay := policy.RetryDelays[j.RetryCount]
+			delay := policy.RetryDelays[min(j.RetryCount, len(policy.RetryDelays)-1)]
 			if reason == "search_error" || reason == "rate_limited" {
 				delay = []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute}[min(j.RetryCount, 2)]
 			}

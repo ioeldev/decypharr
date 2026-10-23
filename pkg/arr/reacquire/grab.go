@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirrobot01/decypharr/pkg/arr"
 )
@@ -21,6 +22,8 @@ func (handler *arrHandler) grabBestRelease(
 }
 
 var errNoReplacement = errors.New("no downloadable replacement release")
+
+var errNoCachedReplacement = fmt.Errorf("%w: candidates were rejected as uncached", errNoReplacement)
 
 var errNoSeasonPack = errors.New("no eligible replacement season pack")
 
@@ -72,7 +75,10 @@ func (handler *arrHandler) grabReplacementRelease(ctx context.Context, instance 
 		if err != nil {
 			return "", err
 		}
-		return handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
+		status, err := handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
+		if !errors.Is(err, arr.ErrReleaseNotCached) {
+			return status, err
+		}
 	}
 
 	releases, err := handler.replacementReleases(ctx, instance, job, bindings, seasonPackOnly)
@@ -87,11 +93,22 @@ func (handler *arrHandler) grabReplacementRelease(ctx context.Context, instance 
 		if err != nil {
 			return "", err
 		}
+		if previous, exists := mutationForKey(*job, mutation.Key); exists && previous.State == MutationRejected {
+			continue
+		}
 		mutation, err = ensureMutationIntent(job, progress, StatusSearching, mutation)
 		if err != nil {
 			return "", err
 		}
-		return handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
+		status, err := handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
+		if !errors.Is(err, arr.ErrReleaseNotCached) {
+			return status, err
+		}
+	}
+	for _, mutation := range job.Mutations {
+		if mutation.State == MutationRejected {
+			return "", errNoCachedReplacement
+		}
 	}
 	if seasonPackOnly {
 		return "", errNoSeasonPack
@@ -228,6 +245,15 @@ func (handler *arrHandler) dispatchReleaseMutation(
 		return "", err
 	}
 	if err := handler.arrs.GrabRelease(ctx, instance.Name, release); err != nil {
+		if errors.Is(err, arr.ErrReleaseNotCached) {
+			mutation.State = MutationRejected
+			mutation.RejectedAt = time.Now().UTC()
+			mutation.RejectionCode = "torrent_not_cached"
+			if saveErr := persistMutation(job, progress, StatusSearching, mutation); saveErr != nil {
+				return "", arr.UnknownMutationOutcome(fmt.Errorf("persist cache rejection: %w", saveErr), 0)
+			}
+			return "", err
+		}
 		if !errors.Is(err, arr.ErrMutationOutcomeUnknown) {
 			return "", err
 		}

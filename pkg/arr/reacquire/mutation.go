@@ -44,10 +44,11 @@ type MutationState string
 const (
 	MutationIntent    MutationState = "intent"
 	MutationConfirmed MutationState = "confirmed"
+	MutationRejected  MutationState = "rejected"
 )
 
 func (state MutationState) valid() bool {
-	return state == MutationIntent || state == MutationConfirmed
+	return state == MutationIntent || state == MutationConfirmed || state == MutationRejected
 }
 
 type Mutation struct {
@@ -68,6 +69,8 @@ type Mutation struct {
 	LastDispatchedAt time.Time     `json:"lastDispatchedAt,omitzero"`
 	Attempts         int           `json:"attempts,omitzero"`
 	ReceiptID        int           `json:"receiptId,omitzero"`
+	RejectedAt       time.Time     `json:"rejectedAt,omitzero"`
+	RejectionCode    string        `json:"rejectionCode,omitempty"`
 	ConfirmedAt      time.Time     `json:"confirmedAt,omitzero"`
 }
 
@@ -89,6 +92,9 @@ func (m Mutation) validate() error {
 		return errors.New("unattempted mutation cannot have a dispatch timestamp")
 	case m.State == MutationConfirmed && m.ConfirmedAt.IsZero():
 		return errors.New("confirmed mutation timestamp is required")
+	}
+	if m.State == MutationRejected && (m.Kind != MutationReleaseGrab || m.RejectionCode != "torrent_not_cached" || m.RejectedAt.IsZero() || m.Attempts == 0) {
+		return errors.New("rejected mutation requires an attempted release grab and cache-rejection receipt")
 	}
 	switch m.Kind {
 	case MutationHistoryFailed:
@@ -149,7 +155,7 @@ func mutationForKey(job Job, key string) (Mutation, bool) {
 
 func mutationOfKind(job Job, kind MutationKind) (Mutation, bool) {
 	for _, mutation := range job.Mutations {
-		if mutation.Kind == kind {
+		if mutation.Kind == kind && mutation.State != MutationRejected {
 			return cloneMutation(mutation), true
 		}
 	}

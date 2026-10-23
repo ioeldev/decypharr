@@ -412,6 +412,9 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 			if errors.Is(err, errNoReplacement) {
 				reason = "no_download"
 			}
+			if errors.Is(err, errNoCachedReplacement) {
+				reason = "cache_miss"
+			}
 			return s.scheduleRecovery(current, reason, err.Error()) == nil
 		}
 		_, updateErr := s.updateJob(job.ID, StatusFailed, func(job *Job) {

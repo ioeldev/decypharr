@@ -28,6 +28,7 @@ type Service struct {
 	searchCooldown map[string]searchCooldown
 	client         *request.Client
 	mutation       *request.Client
+	releaseGrab    *request.Client
 	logger         zerolog.Logger
 	cleanups       singleflight.Group
 }
@@ -38,6 +39,7 @@ func New() *Service {
 		logger:         logger.New("arr"),
 		search:         request.New(request.WithTimeout(0), request.WithResponseHeaderTimeout(0), request.WithMaxRetries(0), request.WithRetryableStatus()),
 		searchCooldown: make(map[string]searchCooldown),
+		releaseGrab:    request.New(request.WithTimeout(0), request.WithMaxRetries(0), request.WithRetryableStatus()),
 		client: request.New(
 			request.WithTimeout(0),
 			request.WithMaxRetries(5),
