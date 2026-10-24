@@ -96,7 +96,14 @@ func (m *Manager) submitUncachedRecovery(ctx context.Context, request *ImportReq
 		return nil, err
 	}
 	torrent.DownloadUncached = true
-	checked, err := client.CheckStatus(torrent)
+	var checked *debridTypes.Torrent
+	if observer, supported := client.(interface {
+		CheckRecoveryStatus(*debridTypes.Torrent) (*debridTypes.Torrent, error)
+	}); supported {
+		checked, err = observer.CheckRecoveryStatus(torrent)
+	} else {
+		checked, err = client.CheckStatus(torrent)
+	}
 	if err != nil {
 		// The placement is already owned. Keep it queued for observation rather
 		// than resubmitting or discarding its identity after a status-check error.
@@ -126,7 +133,15 @@ func (m *Manager) ObserveUncached(ctx context.Context, job reacquire.Job) (reacq
 	if err := ctx.Err(); err != nil {
 		return reacquire.UncachedObservation{}, err
 	}
-	torrent, err := client.GetTorrent(fallback.ProviderID)
+	var torrent *debridTypes.Torrent
+	var err error
+	if observer, supported := client.(interface {
+		CheckRecoveryStatus(*debridTypes.Torrent) (*debridTypes.Torrent, error)
+	}); supported {
+		torrent, err = observer.CheckRecoveryStatus(&debridTypes.Torrent{Id: fallback.ProviderID})
+	} else {
+		torrent, err = client.GetTorrent(fallback.ProviderID)
+	}
 	if err != nil || torrent == nil {
 		if fallback.Phase == reacquire.UncachedCleanup {
 			absent, inventoryErr := recoveryPlacementAbsent(ctx, client, fallback.ProviderID)

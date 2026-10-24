@@ -522,9 +522,17 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 		}
 		if err != nil && torrent != nil && torrent.Id != "" {
 			// Delete the torrent if it was not downloaded
-			go func(id string) {
-				_ = db.DeleteTorrent(id)
-			}(torrent.Id)
+			if reported {
+				// Finish the cache probe before fallback checks account ownership.
+				if cleanupErr := db.DeleteTorrent(torrent.Id); cleanupErr != nil {
+					errs = append(errs, fmt.Errorf("cached probe cleanup failed: %v", cleanupErr))
+					continue
+				}
+			} else {
+				go func(id string) {
+					_ = db.DeleteTorrent(id)
+				}(torrent.Id)
+			}
 		}
 		if err != nil {
 			if !reported {

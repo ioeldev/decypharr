@@ -256,6 +256,10 @@ func (ad *AllDebrid) flattenFiles(torrentId string, files []MagnetFile, parentPa
 }
 
 func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
+	return ad.getTorrent(torrentId, false)
+}
+
+func (ad *AllDebrid) getTorrent(torrentId string, recovery bool) (*types.Torrent, error) {
 	var res TorrentInfoResponse
 
 	resp, err := ad.doRequest(context.Background(), ad.client, "/magnet/status", map[string]string{"id": torrentId}, &res)
@@ -267,11 +271,17 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		return nil, fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
 	}
 
+	if err := validateAllDebridResponse(resp, res.Status, res.Error); err != nil {
+		return nil, err
+	}
 	data, err := findMagnet(res.Data.Magnets, torrentId)
 	if err != nil {
 		return nil, err
 	}
 	status := getAlldebridStatus(data.StatusCode)
+	if recovery && data.StatusCode == allDebridNoPeerStatusCode {
+		status = types.TorrentStatusError
+	}
 	name := data.Filename
 	t := &types.Torrent{
 		Id:               strconv.Itoa(data.Id),
@@ -285,15 +295,21 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Added:            time.Unix(data.CompletionDate, 0),
 	}
 	t.Bytes = data.Size
+	t.DownloadedBytes = data.Downloaded
 	t.Seeders = data.Seeders
 	if status == "downloaded" {
 		t.Progress = 100
 		index := -1
 		files := ad.flattenFiles(t.Id, data.Files, "", &index)
 		t.Files = files
+		if len(data.Files) == 0 {
+			if err := ad.loadTorrentFiles(t); err != nil {
+				return nil, err
+			}
+		}
 	} else {
-		if data.Size > 0 {
-			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		if data.Size > 0 && data.Downloaded != nil {
+			t.Progress = float64(*data.Downloaded) / float64(data.Size) * 100
 		}
 		t.Speed = data.DownloadSpeed
 	}
@@ -324,6 +340,7 @@ func (ad *AllDebrid) updateTorrent(t *types.Torrent) (int, error) {
 	t.OriginalFilename = name
 	t.Debrid = ad.config.Name
 	t.Bytes = data.Size
+	t.DownloadedBytes = data.Downloaded
 	t.Seeders = data.Seeders
 	if data.Hash != "" {
 		t.InfoHash = data.Hash
@@ -334,9 +351,14 @@ func (ad *AllDebrid) updateTorrent(t *types.Torrent) (int, error) {
 		index := -1
 		files := ad.flattenFiles(t.Id, data.Files, "", &index)
 		t.Files = files
+		if len(data.Files) == 0 {
+			if err := ad.loadTorrentFiles(t); err != nil {
+				return 0, err
+			}
+		}
 	} else {
-		if data.Size > 0 {
-			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		if data.Size > 0 && data.Downloaded != nil {
+			t.Progress = float64(*data.Downloaded) / float64(data.Size) * 100
 		}
 		t.Speed = data.DownloadSpeed
 	}

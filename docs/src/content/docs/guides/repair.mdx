@@ -564,7 +564,7 @@ default. For repair jobs whose Arr has `download_uncached: false`, it allows an
 uncached replacement only after a successful interactive search and explicit,
 identity-bearing cache rejection of every eligible release. Search errors,
 timeouts, and missing or conflicting torrent hashes do not authorize fallback.
-Recovery submission currently supports Real-Debrid and TorBox, whose adapters
+Recovery submission currently supports AllDebrid, Real-Debrid, and TorBox, whose adapters
 provide complete ownership inventories. Other providers fail closed.
 Positive seed counts are preferred, unknown counts come next, and explicit zero
 seed counts are skipped. Normal Arr and provider download settings are unchanged.
@@ -576,7 +576,7 @@ has an uncertain outcome. Job details expose the fallback phase, reservation,
 last progress, and observation errors.
 
 **Uncached Stall Timeout** (`repair.uncached_stall_timeout`) defaults to `2h`.
-Successfully observed progress resets the timer: downloaded bytes for TorBox,
+Successfully observed progress resets the timer: downloaded bytes for AllDebrid and TorBox,
 and download percentage for Real-Debrid. Progressing downloads have no total-duration
 limit. A reset progress counter starts a fresh baseline. Failed observations or
 missing progress values cannot establish a stall and are reported in the job.
@@ -588,3 +588,9 @@ files. Remote deletion must be confirmed before capacity is released. Shared
 placements and uncertain outcomes retain their reservation for operator attention.
 Turning the setting off prevents new submissions; accepted downloads continue to
 be monitored. Scheduled audits are controlled separately.
+
+AllDebrid recovery uses an unfiltered account snapshot and records the exact
+upload ID before monitoring it. Its no-peer timeout (status 7) is treated as a
+failed recovery candidate, without automatically restarting it. Cleanup must be
+confirmed before another candidate starts. Normal AllDebrid downloads retain
+their existing no-peer restart behavior.

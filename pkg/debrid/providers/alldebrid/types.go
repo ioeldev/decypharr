@@ -25,7 +25,7 @@ type magnetInfo struct {
 	Status         string       `json:"status"`
 	StatusCode     int          `json:"statusCode"`
 	UploadDate     int64        `json:"uploadDate"`
-	Downloaded     int64        `json:"downloaded"`
+	Downloaded     *int64       `json:"downloaded"`
 	Uploaded       int64        `json:"uploaded"`
 	DownloadSpeed  int64        `json:"downloadSpeed"`
 	UploadSpeed    int64        `json:"uploadSpeed"`

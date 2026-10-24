@@ -3,7 +3,11 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -12,6 +16,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
 	"github.com/sirrobot01/decypharr/pkg/debrid/common"
+	"github.com/sirrobot01/decypharr/pkg/debrid/providers/alldebrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
@@ -157,5 +162,48 @@ func TestUncachedPercentageObservation(t *testing.T) {
 		if err != nil || observation.ProgressPercent == nil || *observation.ProgressPercent != percentage {
 			t.Fatalf("percentage=%v observation=%+v err=%v", percentage, observation, err)
 		}
+	}
+}
+
+func TestAllDebridRecoveryCleanupConfirmsRemoteRemoval(t *testing.T) {
+	for _, retain := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retain=%v", retain), func(t *testing.T) {
+			manager, _, job := recoveryManagerFixture(t)
+			var deleted atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/magnet/delete" {
+					if r.URL.Query().Get("id") != "42" {
+						t.Error("wrong deletion identity")
+					}
+					if !retain {
+						deleted.Store(true)
+					}
+					fmt.Fprint(w, `{"status":"success"}`)
+					return
+				}
+				if deleted.Load() {
+					fmt.Fprint(w, `{"status":"success","data":{"magnets":[]}}`)
+					return
+				}
+				fmt.Fprintf(w, `{"status":"success","data":{"magnets":[{"id":42,"hash":"%s","statusCode":7,"downloaded":123}]}}`, job.Uncached.SelectedHash)
+			}))
+			defer server.Close()
+			provider, err := alldebrid.New(config.Debrid{Name: "provider", Provider: "alldebrid"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider.Host = server.URL
+			manager.clients.Store("provider", provider)
+			job.Uncached.ProviderID = "42"
+			job.Uncached.ProviderFingerprint = recoveryProviderFingerprint(provider)
+			observation, err := manager.ObserveUncached(t.Context(), job)
+			if err != nil || !observation.Failed {
+				t.Fatalf("observation=%+v err=%v", observation, err)
+			}
+			err = manager.CleanupUncached(t.Context(), job)
+			if (err != nil) != retain {
+				t.Fatalf("cleanup err=%v retain=%v", err, retain)
+			}
+		})
 	}
 }
