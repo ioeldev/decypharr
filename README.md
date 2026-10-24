@@ -31,24 +31,12 @@ Inherited from upstream:
 
 Use a Linux Docker host with Docker Compose and `/dev/fuse` available for the mount configuration below. The preview image supports **linux/amd64** and **linux/arm64**.
 
-### 1. Choose the fork image
-
-Fork images are published to **`ghcr.io/ioeldev/decypharr`**. Use a pinned digest so an update is deliberate. The following image was published from commit [`ca1b2698b4e381f2f1f517b49e47d42846c09aa7`](https://github.com/ioeldev/decypharr/commit/ca1b2698b4e381f2f1f517b49e47d42846c09aa7) on October 24, 2026; [build and provenance](https://github.com/ioeldev/decypharr/actions/runs/40069888388).
-
-Create an installation directory and a `configs` subdirectory. Save this as `.env` in the installation directory:
-
-```dotenv
-DECYPHARR_IMAGE=ghcr.io/ioeldev/decypharr@sha256:c3cc19872f8e7ba3a0740fa38eda3021736be962edfd3c35043c88ff1bdc3d52
-```
-
-New builds have unique `sha-<commit>-run-<run-id>-<attempt>` tags. For a later build, use the digest and source repository/ref recorded in the [Build GHCR image workflow](https://github.com/ioeldev/decypharr/actions/workflows/ghcr-manual.yml) summary. That workflow can also build upstream source: select a successful **ioeldev/decypharr** build from **ioel/beta** for this preview. There is no rolling `latest` or `preview` tag from this workflow.
-
-### 2. Create `compose.yaml`
+Save the following as `compose.yaml` in your installation directory. It uses the fork image from `ghcr.io/ioeldev/decypharr`, pinned to the [published preview build](https://github.com/ioeldev/decypharr/actions/runs/40069888388).
 
 ```yaml
 services:
   decypharr:
-    image: ${DECYPHARR_IMAGE:?Set DECYPHARR_IMAGE in .env}
+    image: ghcr.io/ioeldev/decypharr@sha256:c3cc19872f8e7ba3a0740fa38eda3021736be962edfd3c35043c88ff1bdc3d52
     container_name: decypharr
     ports:
       - "8282:8282"
@@ -73,7 +61,7 @@ services:
 
 Set `PUID`/`PGID` to a user/group with access to your library, and `TZ` to the timezone you want scheduled audits to use. Adapt `/mnt` to your media layout and host mount-propagation configuration. **Sonarr/Radarr library paths and absolute symlink targets must resolve at the same paths inside Decypharr.** For example, an Arr path of `/data/media/tv` requires a matching `/data/media` mount here if it is outside `/mnt`. Missing or differently mapped mounts can make an audit inconclusive.
 
-### 3. Start and configure
+### Start and configure
 
 From the installation directory:
 
@@ -87,7 +75,7 @@ docker compose logs --tail=100 -f decypharr
 
 Open `http://YOUR_DOCKER_HOST:8282`, complete registration/setup as prompted, and configure your provider and Arr connections. When adding Decypharr to Sonarr/Radarr, use a hostname reachable from those applications; `localhost` in another container points to that container itself. Enable optional NFS/SMB only if your setup needs them.
 
-### 4. Run a detection-only audit
+### Run a detection-only audit
 
 Check library mounts and permissions first. Go to **Repair → Health checks → Run a health check**, enable **Audit imported library files**, and turn **Automatically repair** off for the initial run. Inspect the findings before choosing **Repair all broken entries** or enabling scheduled automatic repairs.
 
