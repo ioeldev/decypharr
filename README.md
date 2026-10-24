@@ -1,6 +1,6 @@
 # Decypharr — ioel fork
 
-A public preview of an independently maintained [Decypharr](https://github.com/sirrobot01/decypharr) fork, focused on a React interface and library audit and recovery workflows.
+A public preview of an independently maintained [Decypharr](https://github.com/sirrobot01/decypharr) fork, focused on symlink repairing library audit, recovery workflows, and a sleek React interface.
 
 Decypharr is a media gateway written in Go that connects Sonarr, Radarr, and other Arr applications to Debrid providers and Usenet. This fork builds on sirrobot01's work; it is maintained by [ioeldev](https://github.com/ioeldev) and is not an official upstream release. Development happens on [`ioel/beta`](https://github.com/ioeldev/decypharr/tree/ioel/beta).
 
