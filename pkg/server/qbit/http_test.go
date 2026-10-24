@@ -104,3 +104,16 @@ func TestWriteTorrentAddErrorPreservesSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheRejectionResponsePreservesParsedHash(t *testing.T) {
+	hash := strings.Repeat("a", 40)
+	recorder := httptest.NewRecorder()
+	writeTorrentAddError(recorder, &customerror.CacheRejection{InfoHash: hash, Err: fmt.Errorf("submit: %w", customerror.TorrentNotCachedError)})
+	var response torrentAddErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.InfoHash != hash || response.Code != "torrent_not_cached" {
+		t.Fatalf("response=%+v", response)
+	}
+}

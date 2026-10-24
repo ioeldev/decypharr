@@ -26,10 +26,11 @@ type Handler interface {
 }
 
 type ServiceOptions struct {
-	Arrs      *arr.Service
-	Directory string
-	Index     *Index
-	Handler   Handler
+	UncachedBackend UncachedBackend
+	Arrs            *arr.Service
+	Directory       string
+	Index           *Index
+	Handler         Handler
 }
 
 type jobKey struct {
@@ -40,11 +41,14 @@ type jobKey struct {
 }
 
 type Service struct {
+	uncachedMu           sync.Mutex
+	uncachedBackend      UncachedBackend
 	arrs                 *arr.Service
 	index                *Index
 	bindingRepository    *BindingRepository
 	jobRepository        *JobRepository
 	wake                 chan struct{}
+	ready                chan struct{}
 	repairQueueMu        sync.Mutex
 	repairQueueState     repairQueueState
 	repairQueueError     string
@@ -83,10 +87,12 @@ func NewService(options ServiceOptions) (*Service, error) {
 	}
 	return &Service{
 		arrs:                 options.Arrs,
+		uncachedBackend:      options.UncachedBackend,
 		index:                index,
 		bindingRepository:    bindingRepository,
 		jobRepository:        jobRepository,
 		wake:                 make(chan struct{}, 1),
+		ready:                make(chan struct{}),
 		repairQueuePath:      filepath.Join(options.Directory, "repair_queue.json"),
 		now:                  func() time.Time { return time.Now().UTC() },
 		handler:              options.Handler,
@@ -136,8 +142,10 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.started = true
+	close(s.ready)
 	s.wg.Go(func() { s.run(s.ctx) })
 	s.wg.Go(func() { s.monitorRecoveries(s.ctx) })
+	s.wg.Go(func() { s.monitorUncached(s.ctx) })
 	s.schedulePersistedRetries()
 	s.signal()
 	return nil
@@ -320,5 +328,16 @@ func (s *Service) verifyImported(ctx context.Context, job Job) {
 	s.lifecycleMu.RUnlock()
 	if verify != nil && job.Cause == CauseRepair {
 		verify(ctx, job)
+	}
+}
+
+// WaitForStartup prevents restored download workers from acting before durable
+// recovery ownership has been loaded. Cancellation also covers shutdown before Start.
+func (s *Service) WaitForStartup(ctx context.Context) error {
+	select {
+	case <-s.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

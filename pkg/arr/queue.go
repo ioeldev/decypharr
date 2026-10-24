@@ -123,6 +123,9 @@ func (s *Service) CleanupQueue(ctx context.Context, name string) error {
 	var blocklist, blocklistResearch []int
 	var manualImports []string
 	for _, item := range items {
+		if s.recoveryOwnsDownload(item.DownloadId) {
+			continue
+		}
 		switch resolveQueueAction(item, rules) {
 		case QueueActionBlocklist:
 			blocklist = append(blocklist, item.Id)
@@ -217,6 +220,45 @@ func (s *Service) removeQueueItems(ctx context.Context, name string, ids []int, 
 	}
 	if err := expectSuccess(resp); err != nil {
 		return fmt.Errorf("remove queue items: %w", err)
+	}
+	return nil
+}
+
+// RemoveRecoveryQueue removes only matching records without deleting files,
+// blocklisting, or starting an independent replacement search.
+func (s *Service) RemoveRecoveryQueue(ctx context.Context, name, hash string) error {
+	instance, err := s.instance(name)
+	if err != nil {
+		return err
+	}
+	records, err := s.Queue(ctx, name)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if !strings.EqualFold(record.DownloadId, hash) {
+			continue
+		}
+		if record.EpisodeHasFile || strings.Contains(strings.ToLower(record.TrackedDownloadState), "import") || strings.EqualFold(record.Status, "completed") {
+			return fmt.Errorf("recovery queue reached completion/import during cleanup")
+		}
+		endpoint := fmt.Sprintf("api/v3/queue/%d?removeFromClient=false&blocklist=false&skipRedownload=true&changeCategory=false", record.Id)
+		response, err := s.mutate(ctx, instance, http.MethodDelete, endpoint, nil, nil)
+		if err != nil {
+			return err
+		}
+		if err := expectSuccess(response); err != nil {
+			return err
+		}
+	}
+	records, err = s.Queue(ctx, name)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if strings.EqualFold(record.DownloadId, hash) {
+			return fmt.Errorf("recovery queue cleanup not yet confirmed")
+		}
 	}
 	return nil
 }

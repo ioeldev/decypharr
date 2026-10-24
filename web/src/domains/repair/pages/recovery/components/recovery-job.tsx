@@ -23,6 +23,7 @@ type RecoveryJobProps = {
 
 export default function RecoveryJob({ job, isSelected, onSelect }: RecoveryJobProps) {
   const action = useRecoveryJobActions(job);
+  const uncached = objectValue(job.uncached);
   const binding = objectValue(arrayValue(job.bindings)[0]);
   const status = stringValue(job.status);
   const isTerminal = ['ready', 'failed', 'cancelled'].includes(status);
@@ -96,6 +97,22 @@ export default function RecoveryJob({ job, isSelected, onSelect }: RecoveryJobPr
           <dd>{stringValue(job.retryAt) || '—'}</dd>
         </div>
       </dl>
+      {job.uncached ? (
+        <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+          <div>
+            <dt className="text-muted-foreground">Uncached recovery</dt>
+            <dd>{stringValue(uncached.phase).replaceAll('_', ' ')}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Last byte progress</dt>
+            <dd>{stringValue(uncached.lastProgressAt) || 'Waiting for observation'}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Capacity reserved</dt>
+            <dd>{uncached.reserved ? 'Yes' : 'No'}</dd>
+          </div>
+        </dl>
+      ) : null}
       {job.lastError ? (
         <p className="break-words text-destructive">{stringValue(job.lastError)}</p>
       ) : null}

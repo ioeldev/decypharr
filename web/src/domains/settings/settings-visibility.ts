@@ -27,6 +27,9 @@ const commonFields: Record<string, readonly string[]> = {
     'schedule',
     'arrs',
     'auto_repair',
+    'uncached_recovery_fallback',
+    'max_uncached_recoveries',
+    'uncached_stall_timeout',
     'library_audit',
     'scheduled_full_audit',
   ],
@@ -84,6 +87,9 @@ export function isRelevantSetting({
       name === 'arrs' ||
       name === 'strategy' ||
       name === 'replace_whole_season' ||
+      name === 'uncached_recovery_fallback' ||
+      name === 'max_uncached_recoveries' ||
+      name === 'uncached_stall_timeout' ||
       name === 'library_audit' ||
       name === 'scheduled_full_audit' ||
       name.startsWith('queue_')

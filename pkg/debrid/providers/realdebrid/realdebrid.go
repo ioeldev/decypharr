@@ -463,13 +463,14 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		}
 		t := &types.Torrent{
 			Id:               data.ID,
+			InfoHash:         data.Hash,
 			Name:             data.Filename,
 			Bytes:            data.Bytes,
 			Progress:         data.Progress,
 			Speed:            data.Speed,
 			Seeders:          data.Seeders,
 			Added:            addedOn,
-			Status:           types.TorrentStatus(data.Status),
+			Status:           getStatus(data.Status),
 			Filename:         data.Filename,
 			OriginalFilename: data.OriginalFilename,
 			Links:            data.Links,

@@ -206,7 +206,7 @@ func (s *Service) DeleteJobs(ids []string) (int, error) {
 		if !exists {
 			continue
 		}
-		if !job.Status.Terminal() {
+		if !job.Status.Terminal() || (job.Uncached != nil && job.Uncached.Reserved) {
 			return 0, fmt.Errorf("%w: job %q is %s", ErrJobNotTerminal, id, job.Status)
 		}
 		uniqueIDs = append(uniqueIDs, id)
@@ -349,6 +349,7 @@ func (s *Service) runJob(ctx context.Context, handler Handler, job Job) bool {
 			}
 			current.RetryReason = ""
 			current.Mutations = nil
+			current.Uncached = nil
 			current.SearchCompletedAt = time.Time{}
 			current.AttemptStartedAt = s.now()
 		} else if current.AttemptStartedAt.IsZero() {
@@ -730,6 +731,9 @@ func keyForJob(job Job) jobKey {
 }
 
 func (s *Service) completeJobFromIndex(job Job) error {
+	if job.Uncached != nil && job.Uncached.Phase != UncachedComplete {
+		return nil
+	}
 	replacementDownloadIDs, ready := s.replacementsForJob(job)
 	if !ready {
 		return nil
@@ -809,6 +813,9 @@ func (s *Service) maintainJobs() {
 
 	s.jobsMu.RLock()
 	for id, job := range s.jobs {
+		if job.Uncached != nil && job.Uncached.Phase != UncachedComplete {
+			continue
+		}
 		switch {
 		case job.Cause == CauseRepair && job.Status.waiting() && now.Sub(phaseStart(job)) >= waitingTimeout:
 			stalled = append(stalled, cloneJob(job))

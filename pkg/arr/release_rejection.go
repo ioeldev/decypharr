@@ -3,6 +3,7 @@ package arr
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,7 +47,7 @@ func (s *Service) submitRelease(ctx context.Context, instance Arr, release Relea
 	}
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxReleaseErrorBytes+1))
 	if readErr == nil && len(body) <= maxReleaseErrorBytes && isCacheRejection(body) {
-		return fmt.Errorf("grab release %q: %w", release.Title, ErrReleaseNotCached)
+		return &CacheRejectionError{InfoHash: cacheRejectionHash(body)}
 	}
 	failure := fmt.Errorf("grab release %q: arr returned %s", release.Title, resp.Status)
 	if readErr != nil || resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout {
@@ -87,4 +88,59 @@ func isCacheRejection(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// CacheRejectionError preserves a verified rejection even when its identity is
+// unavailable. Only an unambiguous hash can authorize uncached recovery.
+type CacheRejectionError struct{ InfoHash string }
+
+func (e *CacheRejectionError) Error() string { return ErrReleaseNotCached.Error() }
+func (e *CacheRejectionError) Unwrap() error { return ErrReleaseNotCached }
+
+func NormalizeInfoHash(hash string) string {
+	hash = strings.ToLower(strings.TrimSpace(hash))
+	if len(hash) != 40 {
+		return ""
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return ""
+	}
+	return hash
+}
+
+func cacheRejectionHash(body []byte) string {
+	var response struct {
+		Code        string `json:"code"`
+		InfoHash    string `json:"infoHash"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return ""
+	}
+	if response.Code == "torrent_not_cached" {
+		return NormalizeInfoHash(response.InfoHash)
+	}
+	if !isCacheRejection(body) {
+		return ""
+	}
+	hash := ""
+	for offset := 0; offset < len(response.Description); offset++ {
+		if response.Description[offset] != '{' {
+			continue
+		}
+		var rejection struct {
+			Code     string `json:"code"`
+			InfoHash string `json:"infoHash"`
+			Error    string `json:"error"`
+		}
+		if json.NewDecoder(strings.NewReader(response.Description[offset:])).Decode(&rejection) != nil || rejection.Code != "torrent_not_cached" {
+			continue
+		}
+		identity := NormalizeInfoHash(rejection.InfoHash)
+		if identity == "" || (hash != "" && identity != hash) {
+			return ""
+		}
+		hash = identity
+	}
+	return hash
 }

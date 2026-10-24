@@ -26,6 +26,9 @@ func (m *Manager) restoreActiveDownloadJobs() {
 	// Clear flags left by interrupted local processing. Active downloads remain
 	// in storage for processQueuedEntries. Only unfinished imports need workers.
 	for _, entry := range entries {
+		if m.arrService != nil && m.arrService.OwnsUncachedHash(entry.InfoHash) {
+			continue
+		}
 		if m.ctx.Err() != nil {
 			return
 		}
@@ -183,6 +186,9 @@ func (m *Manager) restoreEmptyCompletedImports() {
 		return
 	}
 	for _, entry := range entries {
+		if m.arrService != nil && m.arrService.OwnsUncachedHash(entry.InfoHash) {
+			continue
+		}
 		if m.ctx.Err() != nil {
 			return
 		}

@@ -556,3 +556,36 @@ Open its detail panel from Browse to see the broken-file list and reason. For Ar
 The job-based repair system (`repair_jobs`, `repair_keys`, the **Add Job** UI) has been removed. On first boot of the new system the legacy buckets are dropped, and existing recurring schedules do **not** carry over — re-enable repair once with the new config.
 
 Per-entry health records (`repair_state`) are forward-compatible; new fields default to empty and populate on the next probe.
+
+### Optional uncached recovery
+
+**Uncached Recovery Fallback** (`repair.uncached_recovery_fallback`) is off by
+default. For repair jobs whose Arr has `download_uncached: false`, it allows an
+uncached replacement only after a successful interactive search and explicit,
+identity-bearing cache rejection of every eligible release. Search errors,
+timeouts, and missing or conflicting torrent hashes do not authorize fallback.
+Recovery submission currently supports Real-Debrid and TorBox, whose adapters
+provide complete ownership inventories. Other providers fail closed.
+Positive seed counts are preferred, unknown counts come next, and explicit zero
+seed counts are skipped. Normal Arr and provider download settings are unchanged.
+
+**Maximum Uncached Recoveries** (`repair.max_uncached_recoveries`) defaults to `1`
+across the server. Waiting jobs release search capacity without consuming retry
+attempts. Reservations survive restarts and remain held when dispatch or cleanup
+has an uncertain outcome. Job details expose the fallback phase, reservation,
+last progress, and observation errors.
+
+**Uncached Stall Timeout** (`repair.uncached_stall_timeout`) defaults to `2h`.
+Successfully observed byte progress resets the timer; progressing downloads have
+no total-duration limit. Failed observations cannot establish a stall. Automatic
+stall cleanup requires a provider that exposes downloaded bytes (currently
+TorBox). Other providers can complete a fallback, but missing byte counters are
+reported in the job and prevent automatic stall cleanup.
+
+Before replacing a failed or stalled download, recovery rechecks completion and
+import state. It removes only the owned provider placement and matching Arr queue
+records, without blocklisting, searching independently, or deleting library
+files. Remote deletion must be confirmed before capacity is released. Shared
+placements and uncertain outcomes retain their reservation for operator attention.
+Turning the setting off prevents new submissions; accepted downloads continue to
+be monitored. Scheduled audits are controlled separately.

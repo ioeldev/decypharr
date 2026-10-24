@@ -168,6 +168,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 type torrentAddErrorResponse struct {
+	InfoHash  string `json:"infoHash,omitempty"`
 	Error     string `json:"error"`
 	Code      string `json:"code"`
 	Retryable bool   `json:"retryable"`
@@ -189,6 +190,9 @@ func writeTorrentAddError(w http.ResponseWriter, err error) {
 		response.Permanent = typed.IsPermanent()
 	}
 
+	if rejection, ok := errors.AsType[*customerror.CacheRejection](err); ok && response.Code == "torrent_not_cached" {
+		response.InfoHash = rejection.InfoHash
+	}
 	utils.JSONResponse(w, response, status)
 }
 
@@ -202,6 +206,10 @@ func (q *QBit) handleTorrentsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, hash := range hashes {
+		if q.manager.ArrService() != nil && q.manager.ArrService().OwnsUncachedHash(hash) {
+			http.Error(w, "download is owned by an uncached recovery", http.StatusConflict)
+			return
+		}
 		err := q.manager.Queue().Delete(hash, deleteFiles, nil)
 		if err != nil && !strings.Contains(err.Error(), "not found") {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

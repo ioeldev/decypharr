@@ -61,3 +61,24 @@ func TestGrabReleaseDisconnectRemainsUncertain(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestCacheRejectionHashRequiresUnambiguousIdentity(t *testing.T) {
+	hash := strings.Repeat("a", 40)
+	direct := `{"code":"torrent_not_cached","infoHash":"` + hash + `"}`
+	if got := cacheRejectionHash([]byte(direct)); got != hash {
+		t.Fatalf("direct=%q", got)
+	}
+	wrapped, _ := json.Marshal(map[string]string{"description": "DownloadClientException QBittorrent: " + `{"code":"torrent_not_cached","error":"torrent not cached","infoHash":"` + hash + `"}`})
+	if got := cacheRejectionHash(wrapped); got != hash {
+		t.Fatalf("wrapped=%q", got)
+	}
+	ambiguous, _ := json.Marshal(map[string]string{"description": "DownloadClientException QBittorrent: " + direct + ` {"code":"torrent_not_cached","error":"torrent not cached","infoHash":"` + strings.Repeat("b", 40) + `"}`})
+	if got := cacheRejectionHash(ambiguous); got != "" {
+		t.Fatalf("ambiguous=%q", got)
+	}
+	for _, response := range []string{`{"code":"torrent_not_cached"}`, `{"code":"torrent_not_cached","infoHash":"bad"}`, `{"message":"torrent_not_cached","infoHash":"` + hash + `"}`} {
+		if got := cacheRejectionHash([]byte(response)); got != "" {
+			t.Fatalf("unproven=%q", got)
+		}
+	}
+}

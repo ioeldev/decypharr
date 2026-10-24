@@ -139,6 +139,9 @@ func validateJob(job Job) error {
 			return fmt.Errorf("invalid job binding: %w", err)
 		}
 	}
+	if err := validateUncached(job.Uncached); err != nil {
+		return err
+	}
 	mutationKeys := make(map[string]struct{}, len(job.Mutations))
 	for _, mutation := range job.Mutations {
 		if err := mutation.validate(); err != nil {

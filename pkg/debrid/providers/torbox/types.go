@@ -112,7 +112,7 @@ type torboxInfo struct {
 	DownloadFinished bool    `json:"download_finished"`
 	Tracker          any     `json:"tracker"`
 	TotalUploaded    int     `json:"total_uploaded"`
-	TotalDownloaded  int     `json:"total_downloaded"`
+	TotalDownloaded  *int64  `json:"total_downloaded"`
 	Cached           bool    `json:"cached"`
 	Owner            string  `json:"owner"`
 	SeedTorrent      bool    `json:"seed_torrent"`

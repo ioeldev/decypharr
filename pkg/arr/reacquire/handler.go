@@ -37,6 +37,9 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 	if !ok {
 		return fmt.Errorf("arr %q is not configured", job.ArrName)
 	}
+	if job.Uncached != nil && job.Uncached.Phase != UncachedComplete {
+		return progress.Update(StatusWaitingForDownload, nil)
+	}
 	bindings, err := mutationBindings(job)
 	if err != nil {
 		return err
@@ -99,20 +102,23 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 		return err
 	}
 	var waitingStatus Status
-	switch job.Strategy {
-	case StrategyHistoryFailed:
+	switch {
+	case useCachedReplacementSearch(job, instance):
+		waitingStatus, err = handler.grabBestRelease(ctx, instance, &job, bindings, progress)
+	case job.Strategy == StrategyHistoryFailed:
 		waitingStatus, err = handler.failHistory(ctx, instance, &job, bindings, failurePlan, downloadConfig, progress)
-	case StrategyCommandSearch:
+	case job.Strategy == StrategyCommandSearch:
 		waitingStatus, err = handler.searchBindings(ctx, instance, &job, bindings, progress)
-	case StrategyInteractiveBest:
+	case job.Strategy == StrategyInteractiveBest:
 		if err = handler.executeExactDownloadFailure(ctx, instance, &job, failurePlan, progress); err == nil {
 			waitingStatus, err = handler.grabBestRelease(ctx, instance, &job, bindings, progress)
 		}
-	case StrategySeasonPackFirst:
+	case job.Strategy == StrategySeasonPackFirst:
 		waitingStatus, err = handler.seasonPackFirst(ctx, instance, &job, bindings, progress)
 	default:
 		return fmt.Errorf("unsupported reacquire strategy %q", job.Strategy)
 	}
+
 	if err != nil {
 		return err
 	}
@@ -377,4 +383,22 @@ func movieTargets(bindings []Binding) []int {
 	}
 	slices.Sort(movieIDs)
 	return slices.Compact(movieIDs)
+}
+
+func useCachedReplacementSearch(job Job, instance arr.Arr) bool {
+	if job.Strategy == StrategySeasonPackFirst {
+		return false
+	}
+	for _, mutation := range job.Mutations {
+		if mutation.Kind == MutationReleaseGrab {
+			return true
+		}
+	}
+	if job.Cause != CauseRepair || !config.Get().Repair.UncachedRecoveryFallback {
+		return false
+	}
+	if instance.DownloadUncached == nil || *instance.DownloadUncached || len(job.Mutations) > 0 {
+		return false
+	}
+	return job.Strategy == StrategyCommandSearch || job.Strategy == StrategyHistoryFailed
 }

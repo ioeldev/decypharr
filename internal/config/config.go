@@ -216,27 +216,30 @@ const (
 // entries that are unhealthy, dirty, or older than RecheckInterval, unless
 // ScheduledFullAudit requests a full library audit regardless of freshness.
 type RepairConfig struct {
-	Enabled               bool         `json:"enabled,omitempty"`
-	Source                RepairSource `json:"source,omitempty"`
-	Schedule              string       `json:"schedule,omitempty"`
-	Workers               int          `json:"workers,omitempty"`
-	NNTPConnectionPercent int          `json:"nntp_connection_percent,omitempty"`
-	Strategy              string       `json:"strategy,omitempty"`
-	RecheckInterval       string       `json:"recheck_interval,omitempty"`
-	Arrs                  []string     `json:"arrs,omitempty"`
-	AutoRepair            bool         `json:"auto_repair,omitempty"`
-	ReplaceWholeSeason    bool         `json:"replace_whole_season,omitempty"`
-	ScheduledFullAudit    bool         `json:"scheduled_full_audit,omitempty"`
-	LibraryAudit          bool         `json:"library_audit,omitempty"`
-	QueueInterval         string       `json:"queue_interval,omitempty"`
-	QueueBatchSize        int          `json:"queue_batch_size,omitempty"`
-	QueueBatchPause       string       `json:"queue_batch_pause,omitempty"`
-	QueueSearchWorkers    int          `json:"queue_search_workers,omitempty"`
-	QueueMaxActive        int          `json:"queue_max_active,omitempty"`
-	QueueSearchTimeout    string       `json:"queue_search_timeout,omitempty"`
-	QueueSearchGrace      string       `json:"queue_search_grace,omitempty"`
-	QueueRetryDelays      string       `json:"queue_retry_delays,omitempty"`
-	QueuePaused           bool         `json:"queue_paused,omitempty"`
+	UncachedRecoveryFallback bool         `json:"uncached_recovery_fallback,omitempty"`
+	MaxUncachedRecoveries    int          `json:"max_uncached_recoveries,omitempty"`
+	UncachedStallTimeout     string       `json:"uncached_stall_timeout,omitempty"`
+	Enabled                  bool         `json:"enabled,omitempty"`
+	Source                   RepairSource `json:"source,omitempty"`
+	Schedule                 string       `json:"schedule,omitempty"`
+	Workers                  int          `json:"workers,omitempty"`
+	NNTPConnectionPercent    int          `json:"nntp_connection_percent,omitempty"`
+	Strategy                 string       `json:"strategy,omitempty"`
+	RecheckInterval          string       `json:"recheck_interval,omitempty"`
+	Arrs                     []string     `json:"arrs,omitempty"`
+	AutoRepair               bool         `json:"auto_repair,omitempty"`
+	ReplaceWholeSeason       bool         `json:"replace_whole_season,omitempty"`
+	ScheduledFullAudit       bool         `json:"scheduled_full_audit,omitempty"`
+	LibraryAudit             bool         `json:"library_audit,omitempty"`
+	QueueInterval            string       `json:"queue_interval,omitempty"`
+	QueueBatchSize           int          `json:"queue_batch_size,omitempty"`
+	QueueBatchPause          string       `json:"queue_batch_pause,omitempty"`
+	QueueSearchWorkers       int          `json:"queue_search_workers,omitempty"`
+	QueueMaxActive           int          `json:"queue_max_active,omitempty"`
+	QueueSearchTimeout       string       `json:"queue_search_timeout,omitempty"`
+	QueueSearchGrace         string       `json:"queue_search_grace,omitempty"`
+	QueueRetryDelays         string       `json:"queue_retry_delays,omitempty"`
+	QueuePaused              bool         `json:"queue_paused,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
 	// the streaming stack and check for a valid container signature, catching
@@ -255,7 +258,7 @@ type RepairConfig struct {
 }
 
 func (r RepairConfig) IsZero() bool {
-	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
+	return !r.UncachedRecoveryFallback && r.MaxUncachedRecoveries == 0 && r.UncachedStallTimeout == "" && !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
 		!r.AutoRepair && !r.LibraryAudit && !r.ReplaceWholeSeason && !r.ScheduledFullAudit && r.StopSchedule == "" && r.QueueInterval == "" && r.QueueBatchSize == 0 && r.QueueBatchPause == "" && r.QueueMaxActive == 0 && r.QueueSearchWorkers == 0 && !r.QueuePaused && r.QueueSearchTimeout == "" && r.QueueSearchGrace == "" && r.QueueRetryDelays == ""
 }

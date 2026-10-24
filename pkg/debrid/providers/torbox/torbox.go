@@ -319,6 +319,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	t := &types.Torrent{
 		Id:               strconv.Itoa(data.Id),
 		InfoHash:         data.Hash,
+		DownloadedBytes:  data.TotalDownloaded,
 		Name:             data.Name,
 		Bytes:            data.Size,
 		Progress:         data.Progress * 100,
@@ -595,6 +596,7 @@ func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
 			Files:            make(map[string]types.File),
 			Added:            data.CreatedAt,
 			InfoHash:         data.Hash,
+			DownloadedBytes:  data.TotalDownloaded,
 		}
 
 		for _, f := range data.Files {

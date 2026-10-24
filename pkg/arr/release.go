@@ -17,6 +17,7 @@ import (
 var ErrReleaseSearch = errors.New("release search failed")
 
 type Release struct {
+	Seeders             *int               `json:"seeders"`
 	GUID                string             `json:"guid"`
 	Title               string             `json:"title"`
 	Indexer             string             `json:"indexer"`

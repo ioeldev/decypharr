@@ -1,6 +1,7 @@
 package reacquire
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -44,6 +45,9 @@ func (s *Service) AcknowledgeJob(id string) (Job, error) {
 	job, ok := s.Job(id)
 	if !ok || job.Status != StatusNeedsAttention {
 		return Job{}, ErrJobNotBlocked
+	}
+	if job.Uncached != nil && job.Uncached.Reserved {
+		return Job{}, errors.New("uncached reservation must be reconciled before acknowledgement")
 	}
 	return s.updateJobDurable(id, StatusCancelled, nil)
 }

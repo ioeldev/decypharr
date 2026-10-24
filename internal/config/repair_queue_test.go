@@ -37,3 +37,19 @@ func TestRecoveryTimingValidation(t *testing.T) {
 		t.Fatalf("configured: %+v %v", p, err)
 	}
 }
+
+func TestUncachedRecoveryPolicy(t *testing.T) {
+	policy, err := (RepairConfig{}).QueuePolicy()
+	if err != nil || policy.UncachedRecoveryFallback || policy.MaxUncachedRecoveries != 1 || policy.UncachedStallTimeout != 2*time.Hour {
+		t.Fatalf("defaults: %+v %v", policy, err)
+	}
+	for _, configuration := range []RepairConfig{{MaxUncachedRecoveries: -1}, {MaxUncachedRecoveries: 11}, {UncachedStallTimeout: "0s"}, {UncachedStallTimeout: "bad"}, {UncachedStallTimeout: "169h"}} {
+		if _, err := configuration.QueuePolicy(); err == nil {
+			t.Fatalf("accepted %+v", configuration)
+		}
+	}
+	policy, err = (RepairConfig{UncachedRecoveryFallback: true, MaxUncachedRecoveries: 2, UncachedStallTimeout: "30m"}).QueuePolicy()
+	if err != nil || !policy.UncachedRecoveryFallback || policy.MaxUncachedRecoveries != 2 || policy.UncachedStallTimeout != 30*time.Minute {
+		t.Fatalf("override: %+v %v", policy, err)
+	}
+}

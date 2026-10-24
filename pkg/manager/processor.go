@@ -25,6 +25,9 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 		return fmt.Errorf("arr is required")
 	}
 
+	if importReq.RecoveryJobID == "" && m.arrService != nil && m.arrService.OwnsUncachedHash(importReq.Magnet.InfoHash) {
+		return fmt.Errorf("hash is reserved by an uncached recovery")
+	}
 	return m.torrentSubmissions.Do(ctx, torrentSubmissionKey(importReq), func() error {
 		// qBittorrent treats adding an existing hash as an idempotent success.
 		// Check again inside the singleflight call so concurrent requests cannot
@@ -39,7 +42,7 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 func (m *Manager) addNewTorrent(ctx context.Context, importReq *ImportRequest) error {
 	debridTorrent, err := m.SendToDebrid(ctx, importReq)
 	if err != nil {
-		if isTooManyActiveDownloads(err) {
+		if importReq.RecoveryJobID == "" && isTooManyActiveDownloads(err) {
 			m.logger.Warn().Msgf("Too many active downloads, marking as queued: %s", importReq.Magnet.Name)
 			return m.queueTorrentRetry(importReq)
 		}
@@ -72,6 +75,11 @@ func (m *Manager) processTorrentJob(ctx context.Context, job *Job) error {
 	}
 	if _, err := m.queue.GetTorrent(job.Entry.InfoHash); err != nil {
 		return nil
+	}
+	if m.arrService != nil && m.arrService.OwnsUncachedHash(job.Entry.InfoHash) {
+		job.Entry.Status = debridTypes.TorrentStatusDownloading
+		job.Entry.IsDownloading = false
+		return m.queue.Update(job.Entry)
 	}
 	if job.ResumeExisting {
 		job.Entry.Status = debridTypes.TorrentStatusDownloading
@@ -200,6 +208,9 @@ func (m *Manager) processQueuedEntries() {
 
 func (m *Manager) processQueuedNZB(entry *storage.Entry) {
 	defer m.processingEntries.Delete(entry.InfoHash)
+	if m.arrService != nil && m.arrService.OwnsUncachedHash(entry.InfoHash) {
+		return
+	}
 	// Check if the nzb is already processed. Only header fields (status, file
 	// list) are needed here; processNZB does not touch the segment map.
 	metadata, err := m.usenet.GetNZBHeader(entry.InfoHash)
@@ -241,6 +252,9 @@ func (m *Manager) processQueuedNZB(entry *storage.Entry) {
 
 func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 	defer m.processingEntries.Delete(entry.InfoHash)
+	if m.arrService != nil && m.arrService.OwnsUncachedHash(entry.InfoHash) {
+		return
+	}
 	placement := entry.GetActiveProvider()
 	if placement == nil {
 		m.logger.Error().Str("name", entry.Name).Msg("No active placement found for queued entry")
@@ -437,6 +451,9 @@ func applyDebridTorrentToEntry(torrent *storage.Entry, debridTorrent *debridType
 
 // SendToDebrid submits a magnet to debrid service(s) - replaces debrid.Parse
 func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest) (*debridTypes.Torrent, error) {
+	if importRequest.RecoveryJobID != "" {
+		return m.submitUncachedRecovery(ctx, importRequest)
+	}
 	debridTorrent := &debridTypes.Torrent{
 		InfoHash: importRequest.Magnet.InfoHash,
 		Magnet:   importRequest.Magnet,
@@ -526,6 +543,19 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 	}
 	if len(errs) == 0 {
 		return nil, fmt.Errorf("failed to process torrent: no clients available")
+	}
+	hasRejection := false
+	allRejected := true
+	for _, providerErr := range errs {
+		if errors.Is(providerErr, customerror.TorrentNotCachedError) {
+			hasRejection = true
+		}
+		if !errors.Is(providerErr, customerror.TorrentNotCachedError) {
+			allRejected = false
+		}
+	}
+	if hasRejection && !allRejected {
+		return nil, fmt.Errorf("provider submission failed: %v", errors.Join(errs...))
 	}
 	joinedErrors := errors.Join(errs...)
 	return nil, fmt.Errorf("failed to process torrent: %w", joinedErrors)

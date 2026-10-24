@@ -52,3 +52,22 @@ func TestRetryPolicyPreservesUnlistedProviderStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestDoOnceDoesNotReplayRetryableMutation(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { attempts++; w.WriteHeader(http.StatusBadGateway) }))
+	defer server.Close()
+	client := New(WithMaxRetries(3), WithRetryableStatus(http.StatusBadGateway))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.DoOnce(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	DrainAndCloseResponse(response)
+	if attempts != 1 || response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("attempts=%d status=%d", attempts, response.StatusCode)
+	}
+}

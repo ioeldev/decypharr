@@ -192,6 +192,7 @@ type RecoveryAttempt struct {
 }
 
 type Job struct {
+	Uncached                 *UncachedRecovery `json:"uncached,omitempty"`
 	Revision                 uint64            `json:"revision,omitempty"`
 	LastObservationAttemptAt time.Time         `json:"lastObservationAttemptAt,omitzero"`
 	DownloadRemaining        float64           `json:"downloadRemaining,omitempty"`
@@ -230,6 +231,7 @@ type Job struct {
 }
 
 func cloneJob(job Job) Job {
+	job.Uncached = cloneUncached(job.Uncached)
 	job.Attempts = slices.Clone(job.Attempts)
 	for i := range job.Attempts {
 		job.Attempts[i].Mutations = slices.Clone(job.Attempts[i].Mutations)

@@ -23,21 +23,25 @@ type repairQueueState struct {
 }
 
 type RepairQueueStatus struct {
-	Queued          int                  `json:"queued"`
-	Total           int                  `json:"total"`
-	StatusCounts    map[Status]int       `json:"status_counts"`
-	InFlight        int                  `json:"in_flight"`
-	InBatch         int                  `json:"in_batch"`
-	NextAllowedAt   time.Time            `json:"next_allowed_at,omitzero"`
-	Interval        string               `json:"interval"`
-	BatchSize       int                  `json:"batch_size"`
-	BatchPause      string               `json:"batch_pause"`
-	SearchCooldowns map[string]time.Time `json:"search_cooldowns,omitempty"`
-	SearchWorkers   int                  `json:"search_workers"`
-	Searching       int                  `json:"searching"`
-	MaxActive       int                  `json:"max_active"`
-	Paused          bool                 `json:"paused"`
-	Error           string               `json:"error,omitempty"`
+	UncachedReserved       int                  `json:"uncached_reserved"`
+	UncachedWaiting        int                  `json:"uncached_waiting"`
+	UncachedCleanupPending int                  `json:"uncached_cleanup_pending"`
+	MaxUncachedRecoveries  int                  `json:"max_uncached_recoveries"`
+	Queued                 int                  `json:"queued"`
+	Total                  int                  `json:"total"`
+	StatusCounts           map[Status]int       `json:"status_counts"`
+	InFlight               int                  `json:"in_flight"`
+	InBatch                int                  `json:"in_batch"`
+	NextAllowedAt          time.Time            `json:"next_allowed_at,omitzero"`
+	Interval               string               `json:"interval"`
+	BatchSize              int                  `json:"batch_size"`
+	BatchPause             string               `json:"batch_pause"`
+	SearchCooldowns        map[string]time.Time `json:"search_cooldowns,omitempty"`
+	SearchWorkers          int                  `json:"search_workers"`
+	Searching              int                  `json:"searching"`
+	MaxActive              int                  `json:"max_active"`
+	Paused                 bool                 `json:"paused"`
+	Error                  string               `json:"error,omitempty"`
 }
 
 func (s *Service) loadRepairQueue() error {
@@ -104,6 +108,7 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 		out.Error = err.Error()
 		out.Paused = true
 	}
+	out.MaxUncachedRecoveries = policy.MaxUncachedRecoveries
 	out.StatusCounts = make(map[Status]int)
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
@@ -123,6 +128,17 @@ func (s *Service) RepairQueueStatus() RepairQueueStatus {
 					out.SearchCooldowns = make(map[string]time.Time)
 				}
 				out.SearchCooldowns[job.ArrName] = until
+			}
+		}
+		if job.Uncached != nil {
+			if job.Uncached.Reserved {
+				out.UncachedReserved++
+			}
+			if job.Uncached.Phase == UncachedWaiting {
+				out.UncachedWaiting++
+			}
+			if job.Uncached.Phase == UncachedCleanup {
+				out.UncachedCleanupPending++
 			}
 		}
 		out.Total++

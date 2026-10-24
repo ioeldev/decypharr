@@ -16,9 +16,10 @@ import (
 type contextKey string
 
 const (
-	categoryKey contextKey = "category"
-	hashesKey   contextKey = "hashes"
-	arrKey      contextKey = "arr"
+	categoryKey     contextKey = "category"
+	hashesKey       contextKey = "hashes"
+	arrKey          contextKey = "arr"
+	recoveryAuthKey contextKey = "recovery_auth"
 )
 
 func getCategory(ctx context.Context) string {
@@ -115,6 +116,8 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), arrKey, a)
+		authenticated, matched := q.manager.Arr().MatchCredentials(category, username, password)
+		ctx = context.WithValue(ctx, recoveryAuthKey, matched && authenticated.Fingerprint() == a.Fingerprint())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

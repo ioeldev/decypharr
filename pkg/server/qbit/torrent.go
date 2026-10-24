@@ -2,6 +2,7 @@ package qbit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -23,9 +24,19 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr arr.Arr, debrid st
 	}
 
 	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
+	if authenticated, _ := ctx.Value(recoveryAuthKey).(bool); authenticated && q.manager.ArrService() != nil {
+		jobID, authorizationErr := q.manager.ArrService().ConsumeUncachedAuthorization(arr, magnet.InfoHash)
+		if authorizationErr != nil {
+			return authorizationErr
+		}
+		importReq.RecoveryJobID = jobID
+	}
 
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
+		if errors.Is(err, customerror.TorrentNotCachedError) {
+			return &customerror.CacheRejection{InfoHash: magnet.InfoHash, Err: err}
+		}
 		return fmt.Errorf("failed to process torrent: %w", err)
 	}
 	return nil
@@ -42,8 +53,18 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 		return customerror.NewError(fmt.Errorf("error reading file %s: %w", fileHeader.Filename, err), http.StatusBadRequest, "invalid_torrent", false, false).Permanent()
 	}
 	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
+	if authenticated, _ := ctx.Value(recoveryAuthKey).(bool); authenticated && q.manager.ArrService() != nil {
+		jobID, authorizationErr := q.manager.ArrService().ConsumeUncachedAuthorization(arr, magnet.InfoHash)
+		if authorizationErr != nil {
+			return authorizationErr
+		}
+		importReq.RecoveryJobID = jobID
+	}
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
+		if errors.Is(err, customerror.TorrentNotCachedError) {
+			return &customerror.CacheRejection{InfoHash: magnet.InfoHash, Err: err}
+		}
 		return fmt.Errorf("failed to process torrent: %w", err)
 	}
 	return nil

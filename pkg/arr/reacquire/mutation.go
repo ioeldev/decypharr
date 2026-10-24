@@ -70,6 +70,7 @@ type Mutation struct {
 	Attempts         int           `json:"attempts,omitzero"`
 	ReceiptID        int           `json:"receiptId,omitzero"`
 	RejectedAt       time.Time     `json:"rejectedAt,omitzero"`
+	RejectionHash    string        `json:"rejectionHash,omitempty"`
 	RejectionCode    string        `json:"rejectionCode,omitempty"`
 	ConfirmedAt      time.Time     `json:"confirmedAt,omitzero"`
 }

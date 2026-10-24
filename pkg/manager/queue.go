@@ -30,6 +30,7 @@ const (
 )
 
 type ImportRequest struct {
+	RecoveryJobID    string                `json:"-"`
 	Name             string                `json:"name"`
 	NZBContent       []byte                `json:"-"`
 	Id               string                `json:"id"`
@@ -162,7 +163,7 @@ func (q *Queue) DeleteStalled(pending func(infoHash string) bool) error {
 		if !t.AddedOn.Before(cutoff) {
 			return false
 		}
-		if t.Status == debridTypes.TorrentStatusQueued && pending(t.InfoHash) {
+		if pending(t.InfoHash) {
 			return false
 		}
 		// Torrent entries: not downloading, no seeders, no progress

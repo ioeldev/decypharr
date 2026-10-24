@@ -1083,6 +1083,24 @@ export const settingsFields: SettingsField[] = [
         "kind": "boolean"
       },
       {
+        "name": "uncached_recovery_fallback",
+        "label": "Uncached Recovery Fallback",
+        "description": "After all eligible releases are explicitly rejected as uncached, try an uncached replacement. Off by default; applies only to cached-only Arr repair jobs.",
+        "kind": "boolean"
+      },
+      {
+        "name": "max_uncached_recoveries",
+        "label": "Maximum Uncached Recoveries",
+        "description": "Server-wide limit. Default: 1. Reservations awaiting cleanup or reconciliation also count.",
+        "kind": "number"
+      },
+      {
+        "name": "uncached_stall_timeout",
+        "label": "Uncached Stall Timeout",
+        "description": "Time without observed byte progress before safe cleanup. Default: 2h. Requires a provider byte counter; progressing downloads have no total time limit.",
+        "kind": "text"
+      },
+      {
         "name": "replace_whole_season",
         "label": "Replace Whole Season",
         "kind": "boolean"

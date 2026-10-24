@@ -134,6 +134,9 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	if once, _ := req.Context().Value(singleAttemptKey{}).(bool); once {
+		return c.httpClient.Do(req)
+	}
 	// Convert to retryablehttp request
 	retryReq, err := retryablehttp.FromRequest(req)
 	if err != nil {
@@ -332,4 +335,12 @@ func SetProxy(transport *http.Transport, proxyURL string) {
 	} else {
 		transport.Proxy = http.ProxyFromEnvironment
 	}
+}
+
+type singleAttemptKey struct{}
+
+// DoOnce preserves authentication, transport, and rate limiting while preventing
+// automatic replay of a mutation whose remote outcome may be unknown.
+func (c *Client) DoOnce(req *http.Request) (*http.Response, error) {
+	return c.Do(req.WithContext(context.WithValue(req.Context(), singleAttemptKey{}, true)))
 }

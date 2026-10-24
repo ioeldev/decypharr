@@ -10,6 +10,7 @@ import (
 )
 
 type Torrent struct {
+	DownloadedBytes  *int64          `json:"downloaded_bytes,omitempty"`
 	Id               string          `json:"id"`
 	InfoHash         string          `json:"info_hash"`
 	Name             string          `json:"name"`
@@ -46,10 +47,16 @@ func (t *Torrent) Copy() *Torrent {
 	t.Lock()
 	defer t.Unlock()
 
+	var downloadedBytes *int64
+	if t.DownloadedBytes != nil {
+		value := *t.DownloadedBytes
+		downloadedBytes = &value
+	}
 	newFiles := make(map[string]File, len(t.Files))
 	maps.Copy(newFiles, t.Files)
 
 	return &Torrent{
+		DownloadedBytes:  downloadedBytes,
 		Id:               t.Id,
 		InfoHash:         t.InfoHash,
 		Name:             t.Name,

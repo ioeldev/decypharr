@@ -17,7 +17,7 @@ func (j Job) newDispatch() bool {
 	return j.Status == StatusRetryScheduled || (j.Status == StatusQueued && j.StartedAt.IsZero())
 }
 func (j Job) occupiesSlot() bool {
-	return !j.Status.Terminal() && j.Status != StatusNeedsAttention && !j.newDispatch()
+	return !(j.Uncached != nil && j.Uncached.Phase != UncachedComplete) && !j.Status.Terminal() && j.Status != StatusNeedsAttention && !j.newDispatch()
 }
 func attemptStart(j Job) time.Time {
 	if !j.AttemptStartedAt.IsZero() {
@@ -57,7 +57,7 @@ func (s *Service) monitorRecoveries(ctx context.Context) {
 
 func (s *Service) observationJobs() []Job {
 	jobs := slices.DeleteFunc(s.Jobs(), func(j Job) bool {
-		return !j.Status.waiting() && j.Status != StatusRetryScheduled && j.Status != StatusNeedsAttention
+		return (j.Uncached != nil && j.Uncached.Phase != UncachedComplete) || (!j.Status.waiting() && j.Status != StatusRetryScheduled && j.Status != StatusNeedsAttention)
 	})
 	slices.SortFunc(jobs, func(a, b Job) int {
 		if c := a.LastObservationAttemptAt.Compare(b.LastObservationAttemptAt); c != 0 {
@@ -515,7 +515,7 @@ func (s *Service) scopeGuardsLocked() func(Job) bool {
 		if other.Cause != CauseRepair || other.Status.Terminal() {
 			continue
 		}
-		if other.occupiesSlot() || other.Status == StatusNeedsAttention {
+		if other.occupiesSlot() || other.Status == StatusNeedsAttention || (other.Uncached != nil && other.Uncached.Phase != UncachedComplete) {
 			for _, key := range recoveryScopes(other) {
 				occupied[key] = true
 			}

@@ -306,9 +306,10 @@ func (m *Manager) init() {
 
 func (m *Manager) initArrServices() {
 	service, err := reacquire.NewService(reacquire.ServiceOptions{
-		Arrs:      m.arr,
-		Directory: filepath.Join(config.GetMainPath(), "db"),
-		Handler:   reacquire.NewHandler(m.arr, m),
+		Arrs:            m.arr,
+		Directory:       filepath.Join(config.GetMainPath(), "db"),
+		Handler:         reacquire.NewHandler(m.arr, m),
+		UncachedBackend: m,
 	})
 	if err != nil {
 		m.logger.Error().Err(err).Msg("Failed to initialize Arr reacquisition service")
@@ -318,6 +319,7 @@ func (m *Manager) initArrServices() {
 		return
 	}
 	m.arrService = service
+	m.arr.SetRecoveryProtection(service.OwnsUncachedHash)
 	m.arrIndexer = reacquire.NewIndexer(m.arr, managedArrCatalog{storage: m.storage, logger: m.logger}, service,
 		filepath.Join(m.config.Mount.MountPath, EntryAllFolder))
 	m.SetArrRecovery(service)
@@ -361,6 +363,11 @@ func (m *Manager) initJobQueue() {
 			}
 		}()
 		defer m.queueRestored.Store(true)
+		if m.arrService != nil {
+			if err := m.arrService.WaitForStartup(m.ctx); err != nil {
+				return
+			}
+		}
 		m.restoreActiveDownloadJobs()
 	})
 }

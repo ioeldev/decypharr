@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
@@ -103,6 +104,15 @@ func (handler *arrHandler) grabReplacementRelease(ctx context.Context, instance 
 		status, err := handler.dispatchReleaseMutation(ctx, instance, job, mutation, release, progress)
 		if !errors.Is(err, arr.ErrReleaseNotCached) {
 			return status, err
+		}
+	}
+	if config.Get().Repair.UncachedRecoveryFallback && job.Cause == CauseRepair && instance.DownloadUncached != nil && !*instance.DownloadUncached {
+		candidates := uncachedCandidates(*job, releases)
+		if len(candidates) > 0 {
+			err := progress.UpdateDurable(StatusWaitingForDownload, func(current *Job) {
+				current.Uncached = &UncachedRecovery{Phase: UncachedWaiting, Candidates: candidates}
+			})
+			return StatusWaitingForDownload, err
 		}
 	}
 	for _, mutation := range job.Mutations {
@@ -249,6 +259,9 @@ func (handler *arrHandler) dispatchReleaseMutation(
 			mutation.State = MutationRejected
 			mutation.RejectedAt = time.Now().UTC()
 			mutation.RejectionCode = "torrent_not_cached"
+			if rejection, ok := errors.AsType[*arr.CacheRejectionError](err); ok {
+				mutation.RejectionHash = rejection.InfoHash
+			}
 			if saveErr := persistMutation(job, progress, StatusSearching, mutation); saveErr != nil {
 				return "", arr.UnknownMutationOutcome(fmt.Errorf("persist cache rejection: %w", saveErr), 0)
 			}

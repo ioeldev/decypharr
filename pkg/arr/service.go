@@ -20,8 +20,9 @@ import (
 
 // Service owns every configured Arr instance and every call made to one.
 type Service struct {
-	mu   sync.RWMutex
-	arrs map[string]Arr
+	mu                sync.RWMutex
+	arrs              map[string]Arr
+	recoveryProtected func(string) bool
 
 	search         *request.Client
 	searchMu       sync.Mutex
@@ -253,4 +254,17 @@ func (s *Service) instanceOfType(name string, want Type) (Arr, error) {
 		return Arr{}, fmt.Errorf("%w: arr %q is %s, want %s", ErrUnsupportedType, name, instance.Type, want)
 	}
 	return instance, nil
+}
+
+func (s *Service) SetRecoveryProtection(protected func(string) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recoveryProtected = protected
+}
+
+func (s *Service) recoveryOwnsDownload(hash string) bool {
+	s.mu.RLock()
+	protected := s.recoveryProtected
+	s.mu.RUnlock()
+	return protected != nil && protected(hash)
 }

@@ -172,6 +172,11 @@ export default function RecoveryQueue() {
               {summary.inFlight} / {numberValue(status.max_active)} active slots ·{' '}
               {numberValue(status.searching)} / {numberValue(status.search_workers)} search workers
             </p>
+            <p>
+              {numberValue(status.uncached_reserved)} / {numberValue(status.max_uncached_recoveries) || 1} uncached slots reserved ·{' '}
+              {numberValue(status.uncached_waiting)} waiting ·{' '}
+              {numberValue(status.uncached_cleanup_pending)} awaiting cleanup
+            </p>
             {summary.nextStart ? <p>Next start allowed: {summary.nextStart}</p> : null}
             <p>
               {summary.retrying} awaiting retry · {summary.cancelled} cancelled

@@ -9,19 +9,38 @@ import (
 // RepairQueuePolicy controls new automatic Arr recovery jobs. In-flight retries
 // retain their mutation-reconciliation path and do not consume new batch slots.
 type RepairQueuePolicy struct {
-	Interval      time.Duration
-	BatchSize     int
-	BatchPause    time.Duration
-	SearchWorkers int
-	MaxActive     int
-	SearchTimeout time.Duration
-	SearchGrace   time.Duration
-	RetryDelays   []time.Duration
-	Paused        bool
+	UncachedRecoveryFallback bool
+	MaxUncachedRecoveries    int
+	UncachedStallTimeout     time.Duration
+	Interval                 time.Duration
+	BatchSize                int
+	BatchPause               time.Duration
+	SearchWorkers            int
+	MaxActive                int
+	SearchTimeout            time.Duration
+	SearchGrace              time.Duration
+	RetryDelays              []time.Duration
+	Paused                   bool
 }
 
 func (r RepairConfig) QueuePolicy() (RepairQueuePolicy, error) {
 	p := RepairQueuePolicy{SearchWorkers: 3, Interval: 10 * time.Second, BatchSize: 50, BatchPause: 5 * time.Minute, MaxActive: 10, Paused: r.QueuePaused, SearchTimeout: 5 * time.Minute, SearchGrace: 2 * time.Minute, RetryDelays: []time.Duration{6 * time.Hour, 24 * time.Hour, 72 * time.Hour}}
+	p.UncachedRecoveryFallback = r.UncachedRecoveryFallback
+	p.MaxUncachedRecoveries = 1
+	p.UncachedStallTimeout = 2 * time.Hour
+	if r.MaxUncachedRecoveries < 0 || r.MaxUncachedRecoveries > 10 {
+		return p, fmt.Errorf("repair.max_uncached_recoveries must be between 1 and 10 (or 0 for the default)")
+	}
+	if r.MaxUncachedRecoveries > 0 {
+		p.MaxUncachedRecoveries = r.MaxUncachedRecoveries
+	}
+	if r.UncachedStallTimeout != "" {
+		timeout, err := time.ParseDuration(r.UncachedStallTimeout)
+		if err != nil || timeout < time.Minute || timeout > 7*24*time.Hour {
+			return p, fmt.Errorf("repair.uncached_stall_timeout must be between 1m and 168h")
+		}
+		p.UncachedStallTimeout = timeout
+	}
 	if r.QueueSearchWorkers < 0 || r.QueueSearchWorkers > 10 {
 		return p, fmt.Errorf("repair.queue_search_workers must be between 1 and 10 (or 0 for the default)")
 	}
