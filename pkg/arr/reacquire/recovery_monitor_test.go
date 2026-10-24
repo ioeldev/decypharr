@@ -389,3 +389,43 @@ func TestManualRecoveryDoesNotInheritAutomaticRepairRetries(t *testing.T) {
 		t.Fatal("observations erased the existing manual recovery timeout")
 	}
 }
+
+func TestRetryPreflightUsesSuccessfulObservationWindow(t *testing.T) {
+	var historyPages atomic.Int32
+	observedAt := time.Now().UTC()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/movie/9":
+			fmt.Fprint(w, `{"id":9,"hasFile":false}`)
+		case "/api/v3/command":
+			fmt.Fprint(w, `[]`)
+		case "/api/v3/queue":
+			fmt.Fprint(w, `{"records":[],"totalRecords":0}`)
+		case "/api/v3/history":
+			historyPages.Add(1)
+			if r.URL.Query().Get("page") != "1" {
+				http.Error(w, "older history unavailable", 503)
+				return
+			}
+			fmt.Fprintf(w, `{"totalRecords":1000,"records":[{"id":55,"eventType":"grabbed","movieId":88,"downloadId":"unrelated","date":%q}]}`, observedAt.Add(-3*time.Minute).Format(time.RFC3339Nano))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	service, job, _ := recoveryFixture(t, server.URL)
+	job, err := service.updateJobDurable(job.ID, StatusRetryScheduled, func(current *Job) {
+		current.LastObservedAt = observedAt
+		current.RetryReason = "cache_miss"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !service.prepareRecoveryRetry(t.Context(), job) {
+		t.Fatal("retry rescanned older history")
+	}
+	if historyPages.Load() != 1 {
+		t.Fatalf("history pages=%d", historyPages.Load())
+	}
+}

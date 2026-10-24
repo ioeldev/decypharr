@@ -28,6 +28,17 @@ func attemptStart(j Job) time.Time {
 	}
 	return j.CreatedAt
 }
+
+// Successful observations already reconciled older grabs. Keep an overlap for
+// delayed Arr history visibility without rescanning the entire original attempt.
+func recoveryHistoryStart(job Job) time.Time {
+	start := attemptStart(job)
+	if job.LastObservedAt.After(start) {
+		return job.LastObservedAt.Add(-2 * time.Minute)
+	}
+	return start
+}
+
 func phaseStart(j Job) time.Time {
 	if j.DownloadProgressAt.After(j.PhaseStartedAt) {
 		return j.DownloadProgressAt
@@ -112,10 +123,7 @@ func (s *Service) reconcileSearchJobs(ctx context.Context) {
 	jobs := s.observationJobs()
 	since := map[string]time.Time{}
 	for _, j := range jobs {
-		start := attemptStart(j)
-		if j.LastObservedAt.After(start) {
-			start = j.LastObservedAt.Add(-2 * time.Minute)
-		}
+		start := recoveryHistoryStart(j)
 		if since[j.ArrName].IsZero() || start.Before(since[j.ArrName]) {
 			since[j.ArrName] = start
 		}
@@ -399,7 +407,7 @@ func (s *Service) prepareRecoveryRetry(ctx context.Context, j Job) bool {
 		}
 		return false
 	}
-	snapshot, err := s.recoverySnapshot(ctx, j.ArrName, attemptStart(j))
+	snapshot, err := s.recoverySnapshot(ctx, j.ArrName, recoveryHistoryStart(j))
 	if err != nil {
 		s.recordObservationError(j, err)
 		return false
