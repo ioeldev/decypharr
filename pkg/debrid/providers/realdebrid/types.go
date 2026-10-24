@@ -80,7 +80,7 @@ type torrentInfo struct {
 	OriginalBytes    int64     `json:"original_bytes"`
 	Host             string    `json:"host"`
 	Split            int       `json:"split"`
-	Progress         float64   `json:"progress"`
+	Progress         *float64  `json:"progress"`
 	Status           string    `json:"status"`
 	Added            time.Time `json:"added"`
 	Files            []struct {
@@ -164,3 +164,10 @@ type hostData struct {
 }
 
 type TrafficResponse map[string]hostData
+
+func (info torrentInfo) progressPercent() float64 {
+	if info.Progress == nil {
+		return 0
+	}
+	return *info.Progress
+}

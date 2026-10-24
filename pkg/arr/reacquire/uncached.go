@@ -45,6 +45,8 @@ type UncachedRecovery struct {
 	Provider            string              `json:"provider,omitempty"`
 	ProviderID          string              `json:"providerId,omitempty"`
 	ProviderFingerprint string              `json:"providerFingerprint,omitempty"`
+	ProgressMetric      string              `json:"progressMetric,omitempty"`
+	LastPercentage      float64             `json:"lastPercentage,omitempty"`
 	LastBytes           int64               `json:"lastBytes"`
 	LastProgressAt      time.Time           `json:"lastProgressAt,omitzero"`
 	LastObservedAt      time.Time           `json:"lastObservedAt,omitzero"`
@@ -52,6 +54,7 @@ type UncachedRecovery struct {
 }
 
 type UncachedObservation struct {
+	ProgressPercent *float64
 	Missing         bool
 	DownloadedBytes int64
 	Complete        bool
@@ -311,13 +314,23 @@ func (s *Service) reconcileUncached(ctx context.Context, job Job) error {
 		return err
 	}
 	// A reset counter needs a fresh baseline; it cannot prove a stall.
-	progressed := job.Uncached.LastObservedAt.IsZero() || observation.DownloadedBytes != job.Uncached.LastBytes
+	progressMetric := ""
+	percentage := float64(0)
+	progressChanged := observation.DownloadedBytes != job.Uncached.LastBytes
+	if observation.ProgressPercent != nil {
+		progressMetric = "percentage"
+		percentage = *observation.ProgressPercent
+		progressChanged = percentage != job.Uncached.LastPercentage
+	}
+	progressed := job.Uncached.LastObservedAt.IsZero() || progressMetric != job.Uncached.ProgressMetric || progressChanged
 	updated, err := s.updateObservedJob(job, job.Status, func(current *Job) {
 		current.Uncached.LastObservedAt = s.now()
 		current.ObservationError = ""
 		if progressed {
 			current.Uncached.LastProgressAt = s.now()
 			current.Uncached.LastBytes = observation.DownloadedBytes
+			current.Uncached.ProgressMetric = progressMetric
+			current.Uncached.LastPercentage = percentage
 		}
 	})
 	if err != nil {

@@ -10,23 +10,24 @@ import (
 )
 
 type Torrent struct {
-	DownloadedBytes  *int64          `json:"downloaded_bytes,omitempty"`
-	Id               string          `json:"id"`
-	InfoHash         string          `json:"info_hash"`
-	Name             string          `json:"name"`
-	Filename         string          `json:"filename"`
-	OriginalFilename string          `json:"original_filename"`
-	Size             int64           `json:"size"`
-	Bytes            int64           `json:"bytes"` // Size of only the files that are downloaded
-	Magnet           *utils.Magnet   `json:"magnet"`
-	Files            map[string]File `json:"files"`
-	Status           TorrentStatus   `json:"status"`
-	Added            time.Time       `json:"added"`
-	Progress         float64         `json:"progress"`
-	Speed            int64           `json:"speed"`
-	Seeders          int             `json:"seeders"`
-	Links            []string        `json:"links"`
-	DeletedFiles     []string        `json:"deleted_files"`
+	RemoteProgressPercent *float64        `json:"remote_progress_percent,omitempty"`
+	DownloadedBytes       *int64          `json:"downloaded_bytes,omitempty"`
+	Id                    string          `json:"id"`
+	InfoHash              string          `json:"info_hash"`
+	Name                  string          `json:"name"`
+	Filename              string          `json:"filename"`
+	OriginalFilename      string          `json:"original_filename"`
+	Size                  int64           `json:"size"`
+	Bytes                 int64           `json:"bytes"` // Size of only the files that are downloaded
+	Magnet                *utils.Magnet   `json:"magnet"`
+	Files                 map[string]File `json:"files"`
+	Status                TorrentStatus   `json:"status"`
+	Added                 time.Time       `json:"added"`
+	Progress              float64         `json:"progress"`
+	Speed                 int64           `json:"speed"`
+	Seeders               int             `json:"seeders"`
+	Links                 []string        `json:"links"`
+	DeletedFiles          []string        `json:"deleted_files"`
 
 	Debrid string `json:"debrid"`
 
@@ -52,27 +53,33 @@ func (t *Torrent) Copy() *Torrent {
 		value := *t.DownloadedBytes
 		downloadedBytes = &value
 	}
+	var remoteProgressPercent *float64
+	if t.RemoteProgressPercent != nil {
+		value := *t.RemoteProgressPercent
+		remoteProgressPercent = &value
+	}
 	newFiles := make(map[string]File, len(t.Files))
 	maps.Copy(newFiles, t.Files)
 
 	return &Torrent{
-		DownloadedBytes:  downloadedBytes,
-		Id:               t.Id,
-		InfoHash:         t.InfoHash,
-		Name:             t.Name,
-		Filename:         t.Filename,
-		OriginalFilename: t.OriginalFilename,
-		Size:             t.Size,
-		Bytes:            t.Bytes,
-		Magnet:           t.Magnet,
-		Files:            newFiles,
-		Status:           t.Status,
-		Added:            t.Added,
-		Progress:         t.Progress,
-		Speed:            t.Speed,
-		Seeders:          t.Seeders,
-		Links:            append([]string{}, t.Links...),
-		Debrid:           t.Debrid,
+		RemoteProgressPercent: remoteProgressPercent,
+		DownloadedBytes:       downloadedBytes,
+		Id:                    t.Id,
+		InfoHash:              t.InfoHash,
+		Name:                  t.Name,
+		Filename:              t.Filename,
+		OriginalFilename:      t.OriginalFilename,
+		Size:                  t.Size,
+		Bytes:                 t.Bytes,
+		Magnet:                t.Magnet,
+		Files:                 newFiles,
+		Status:                t.Status,
+		Added:                 t.Added,
+		Progress:              t.Progress,
+		Speed:                 t.Speed,
+		Seeders:               t.Seeders,
+		Links:                 append([]string{}, t.Links...),
+		Debrid:                t.Debrid,
 	}
 }
 

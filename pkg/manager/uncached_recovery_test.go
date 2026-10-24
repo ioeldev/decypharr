@@ -141,3 +141,21 @@ func TestRestoreOwnedQueueDoesNotResubmit(t *testing.T) {
 		t.Fatalf("restored entry=%+v", entry)
 	}
 }
+
+func TestUncachedPercentageObservation(t *testing.T) {
+	manager, provider, job := recoveryManagerFixture(t)
+	provider.torrent.DownloadedBytes = nil
+	for _, percentage := range []float64{0, 12.5, 100, -1, 101} {
+		provider.torrent.RemoteProgressPercent = &percentage
+		observation, err := manager.ObserveUncached(t.Context(), job)
+		if percentage < 0 || percentage > 100 {
+			if err == nil {
+				t.Fatal("accepted invalid percentage")
+			}
+			continue
+		}
+		if err != nil || observation.ProgressPercent == nil || *observation.ProgressPercent != percentage {
+			t.Fatalf("percentage=%v observation=%+v err=%v", percentage, observation, err)
+		}
+	}
+}

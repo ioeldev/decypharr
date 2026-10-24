@@ -576,11 +576,10 @@ has an uncertain outcome. Job details expose the fallback phase, reservation,
 last progress, and observation errors.
 
 **Uncached Stall Timeout** (`repair.uncached_stall_timeout`) defaults to `2h`.
-Successfully observed byte progress resets the timer; progressing downloads have
-no total-duration limit. Failed observations cannot establish a stall. Automatic
-stall cleanup requires a provider that exposes downloaded bytes (currently
-TorBox). Other providers can complete a fallback, but missing byte counters are
-reported in the job and prevent automatic stall cleanup.
+Successfully observed progress resets the timer: downloaded bytes for TorBox,
+and download percentage for Real-Debrid. Progressing downloads have no total-duration
+limit. A reset progress counter starts a fresh baseline. Failed observations or
+missing progress values cannot establish a stall and are reported in the job.
 
 Before replacing a failed or stalled download, recovery rechecks completion and
 import state. It removes only the owned provider placement and matching Arr queue

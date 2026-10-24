@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sirrobot01/appendstore"
@@ -147,11 +148,18 @@ func (m *Manager) ObserveUncached(ctx context.Context, job reacquire.Job) (reacq
 	if observation.Complete || observation.Failed {
 		return observation, nil
 	}
-	if torrent.DownloadedBytes == nil || *torrent.DownloadedBytes < 0 {
-		return observation, errors.New("provider does not expose downloaded bytes; cannot establish a safe stall")
+	if torrent.DownloadedBytes != nil && *torrent.DownloadedBytes >= 0 {
+		observation.DownloadedBytes = *torrent.DownloadedBytes
+		return observation, nil
 	}
-	observation.DownloadedBytes = *torrent.DownloadedBytes
-	return observation, nil
+	if torrent.RemoteProgressPercent != nil {
+		percentage := *torrent.RemoteProgressPercent
+		if !math.IsNaN(percentage) && !math.IsInf(percentage, 0) && percentage >= 0 && percentage <= 100 {
+			observation.ProgressPercent = &percentage
+			return observation, nil
+		}
+	}
+	return observation, errors.New("provider does not expose valid download progress; cannot establish a safe stall")
 }
 
 func (m *Manager) CleanupUncached(ctx context.Context, job reacquire.Job) error {

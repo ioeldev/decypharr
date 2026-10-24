@@ -156,73 +156,83 @@ func (backend *fallbackBackend) CleanupUncached(context.Context, Job) error {
 }
 
 func TestUncachedProgressStallCleanupAndDisable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v3/queue" {
-			fmt.Fprint(w, `{"records":[],"totalRecords":0}`)
-			return
-		}
-		fmt.Fprint(w, `{ "id": 9, "hasFile": false }`)
-	}))
-	defer server.Close()
-	service, job, clock := recoveryFixture(t, server.URL)
-	config.Get().Repair.UncachedRecoveryFallback = true
-	job = waitingFallback(t, service, job)
-	job, _, err := service.reserveUncached(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance, _ := service.arrs.Get(job.ArrName)
-	if _, err := service.ConsumeUncachedAuthorization(instance, job.Uncached.SelectedHash); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.RecordUncachedPlacement(UncachedPlacement{JobID: job.ID, Provider: "provider", ProviderID: "owned"}); err != nil {
-		t.Fatal(err)
-	}
-	backend := &fallbackBackend{observation: UncachedObservation{DownloadedBytes: 100}}
-	service.uncachedBackend = backend
-	reconcile := func() {
-		t.Helper()
-		current, _ := service.Job(job.ID)
-		if err := service.reconcileUncached(t.Context(), current); err != nil {
-			t.Fatal(err)
-		}
-	}
-	reconcile()
-	// A progressing download has no total-duration limit, even after disabling fallback.
-	config.Get().Repair.UncachedRecoveryFallback = false
-	clock.Add(int64(8 * time.Hour))
-	backend.observation.DownloadedBytes = 200
-	reconcile()
-	current, _ := service.Job(job.ID)
-	if current.Uncached.LastBytes != 200 || !current.Uncached.Reserved {
-		t.Fatal("progressing download lost reservation")
-	}
-	service.maintainJobs()
-	current, _ = service.Job(job.ID)
-	if current.Status == StatusNeedsAttention {
-		t.Fatal("ordinary deadline stopped progressing download")
-	}
-	clock.Add(int64(3 * time.Hour))
-	backend.observationErr = errors.New("unavailable")
-	if err := service.reconcileUncached(t.Context(), current); err == nil || backend.cleanups != 0 {
-		t.Fatal("observation failure established stall")
-	}
-	backend.observationErr = nil
-	backend.cleanupErr = errors.New("cleanup unavailable")
-	current, _ = service.Job(job.ID)
-	if err := service.reconcileUncached(t.Context(), current); err == nil {
-		t.Fatal("cleanup failure hidden")
-	}
-	current, _ = service.Job(job.ID)
-	if !current.Uncached.Reserved || current.Uncached.Phase != UncachedCleanup {
-		t.Fatal("cleanup failure released capacity")
-	}
-	// Completion during a cleanup retry cancels deletion and releases capacity.
-	backend.observation.Complete = true
-	reconcile()
-	current, _ = service.Job(job.ID)
-	if current.Uncached.Reserved || current.Uncached.Phase != UncachedComplete || backend.cleanups != 1 {
-		t.Fatal("completion was not preserved")
+	for _, metric := range []string{"bytes", "percentage"} {
+		t.Run(metric, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v3/queue" {
+					fmt.Fprint(w, `{"records":[],"totalRecords":0}`)
+					return
+				}
+				fmt.Fprint(w, `{ "id": 9, "hasFile": false }`)
+			}))
+			defer server.Close()
+			service, job, clock := recoveryFixture(t, server.URL)
+			config.Get().Repair.UncachedRecoveryFallback = true
+			job = waitingFallback(t, service, job)
+			job, _, err := service.reserveUncached(job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance, _ := service.arrs.Get(job.ArrName)
+			if _, err := service.ConsumeUncachedAuthorization(instance, job.Uncached.SelectedHash); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.RecordUncachedPlacement(UncachedPlacement{JobID: job.ID, Provider: "provider", ProviderID: "owned"}); err != nil {
+				t.Fatal(err)
+			}
+			backend := &fallbackBackend{observation: UncachedObservation{DownloadedBytes: 100}}
+			percentage := 10.0
+			if metric == "percentage" {
+				backend.observation.ProgressPercent = &percentage
+			}
+			service.uncachedBackend = backend
+			reconcile := func() {
+				t.Helper()
+				current, _ := service.Job(job.ID)
+				if err := service.reconcileUncached(t.Context(), current); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reconcile()
+			// A progressing download has no total-duration limit, even after disabling fallback.
+			config.Get().Repair.UncachedRecoveryFallback = false
+			clock.Add(int64(8 * time.Hour))
+			backend.observation.DownloadedBytes = 200
+			percentage = 20
+			reconcile()
+			current, _ := service.Job(job.ID)
+			if current.Uncached.LastBytes != 200 || !current.Uncached.Reserved {
+				t.Fatal("progressing download lost reservation")
+			}
+			service.maintainJobs()
+			current, _ = service.Job(job.ID)
+			if current.Status == StatusNeedsAttention {
+				t.Fatal("ordinary deadline stopped progressing download")
+			}
+			clock.Add(int64(3 * time.Hour))
+			backend.observationErr = errors.New("unavailable")
+			if err := service.reconcileUncached(t.Context(), current); err == nil || backend.cleanups != 0 {
+				t.Fatal("observation failure established stall")
+			}
+			backend.observationErr = nil
+			backend.cleanupErr = errors.New("cleanup unavailable")
+			current, _ = service.Job(job.ID)
+			if err := service.reconcileUncached(t.Context(), current); err == nil {
+				t.Fatal("cleanup failure hidden")
+			}
+			current, _ = service.Job(job.ID)
+			if !current.Uncached.Reserved || current.Uncached.Phase != UncachedCleanup {
+				t.Fatal("cleanup failure released capacity")
+			}
+			// Completion during a cleanup retry cancels deletion and releases capacity.
+			backend.observation.Complete = true
+			reconcile()
+			current, _ = service.Job(job.ID)
+			if current.Uncached.Reserved || current.Uncached.Phase != UncachedComplete || backend.cleanups != 1 {
+				t.Fatal("completion was not preserved")
+			}
+
+		})
 	}
 }
 

@@ -462,19 +462,20 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 			addedOn = time.Now()
 		}
 		t := &types.Torrent{
-			Id:               data.ID,
-			InfoHash:         data.Hash,
-			Name:             data.Filename,
-			Bytes:            data.Bytes,
-			Progress:         data.Progress,
-			Speed:            data.Speed,
-			Seeders:          data.Seeders,
-			Added:            addedOn,
-			Status:           getStatus(data.Status),
-			Filename:         data.Filename,
-			OriginalFilename: data.OriginalFilename,
-			Links:            data.Links,
-			Debrid:           r.config.Name,
+			Id:                    data.ID,
+			InfoHash:              data.Hash,
+			Name:                  data.Filename,
+			Bytes:                 data.Bytes,
+			Progress:              data.progressPercent(),
+			RemoteProgressPercent: data.Progress,
+			Speed:                 data.Speed,
+			Seeders:               data.Seeders,
+			Added:                 addedOn,
+			Status:                getStatus(data.Status),
+			Filename:              data.Filename,
+			OriginalFilename:      data.OriginalFilename,
+			Links:                 data.Links,
+			Debrid:                r.config.Name,
 		}
 
 		t.Files = r.getTorrentFiles(t, data)
@@ -514,7 +515,8 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	case http.StatusOK:
 		t.Name = data.Filename
 		t.Bytes = data.Bytes
-		t.Progress = data.Progress
+		t.Progress = data.progressPercent()
+		t.RemoteProgressPercent = data.Progress
 		t.Status = types.TorrentStatus(data.Status)
 		t.Speed = data.Speed
 		t.Seeders = data.Seeders
@@ -556,7 +558,8 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 		t.Filename = data.Filename
 		t.OriginalFilename = data.OriginalFilename
 		t.Bytes = data.Bytes
-		t.Progress = data.Progress
+		t.Progress = data.progressPercent()
+		t.RemoteProgressPercent = data.Progress
 
 		t.Speed = data.Speed
 		t.Seeders = data.Seeders
