@@ -2,7 +2,7 @@ name: Build GHCR image
 
 on:
   push:
-    branches: [ioel/shadcn-ui-refactor]
+    branches: [ioel/beta]
     paths:
       - web/src/app/components/version-badge.tsx
       - .github/workflows/ghcr-manual.yml
@@ -19,7 +19,7 @@ on:
       source_ref:
         description: Branch, tag, or full commit SHA to build
         type: string
-        default: beta
+        default: ioel/beta
         required: true
       channel:
         description: Version channel embedded in the binary
