@@ -3,9 +3,6 @@ name: Build GHCR image
 on:
   push:
     branches: [ioel/beta]
-    paths:
-      - web/src/app/components/version-badge.tsx
-      - .github/workflows/ghcr-manual.yml
   workflow_dispatch:
     inputs:
       source_repository:
@@ -33,6 +30,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ghcr-${{ github.event_name }}-${{ github.ref }}-${{ inputs.source_repository }}-${{ inputs.source_ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -86,12 +87,31 @@ jobs:
             io.ioeldev.decypharr.source=https://github.com/${{ steps.source.outputs.repository }}
           cache-from: type=gha,scope=decypharr-manual
           cache-to: type=gha,mode=max,scope=decypharr-manual
+      - name: Update branch image tag
+        id: branch
+        if: github.event_name == 'push'
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          branch_reference=$(git ls-remote --exit-code https://github.com/ioeldev/decypharr.git refs/heads/ioel/beta)
+          read -r branch_head_sha branch_ref <<< "$branch_reference"
+          if [[ "$SOURCE_SHA" != "$branch_head_sha" ]]; then
+            echo "Skipping rolling tag: this build is no longer the branch head."
+            exit 0
+          fi
+
+          docker buildx imagetools create \
+            --tag ghcr.io/ioeldev/decypharr:ioel-beta \
+            "ghcr.io/ioeldev/decypharr@$IMAGE_DIGEST"
+          echo "tag=ghcr.io/ioeldev/decypharr:ioel-beta" >> "$GITHUB_OUTPUT"
       - name: Record deployment reference
         env:
           SOURCE_REPOSITORY: ${{ steps.source.outputs.repository }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           IMAGE_TAG: ${{ steps.source.outputs.tag }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          BRANCH_TAG: ${{ steps.branch.outputs.tag }}
         run: |
           {
             echo "### Published Decypharr image"
@@ -99,6 +119,10 @@ jobs:
             echo "Source: $SOURCE_REPOSITORY@$SOURCE_SHA"
             echo
             echo "Tag: ghcr.io/ioeldev/decypharr:$IMAGE_TAG"
+            if [[ -n "$BRANCH_TAG" ]]; then
+              echo
+              echo "Rolling branch tag: $BRANCH_TAG"
+            fi
             echo
             echo 'Copy this reference into the deployment .env only when ready:'
             echo '~~~dotenv'

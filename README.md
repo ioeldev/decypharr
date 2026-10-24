@@ -31,12 +31,12 @@ Inherited from upstream:
 
 Use a Linux Docker host with Docker Compose and `/dev/fuse` available for the mount configuration below. The preview image supports **linux/amd64** and **linux/arm64**.
 
-Save the following as `compose.yaml` in your installation directory. It uses the fork image from `ghcr.io/ioeldev/decypharr`, pinned to the [published preview build](https://github.com/ioeldev/decypharr/actions/runs/40069888388).
+Save the following as `compose.yaml` in your installation directory. The `ioel-beta` tag follows successful builds of this fork's `ioel/beta` branch.
 
 ```yaml
 services:
   decypharr:
-    image: ghcr.io/ioeldev/decypharr@sha256:c3cc19872f8e7ba3a0740fa38eda3021736be962edfd3c35043c88ff1bdc3d52
+    image: ghcr.io/ioeldev/decypharr:ioel-beta
     container_name: decypharr
     ports:
       - "8282:8282"
@@ -88,10 +88,12 @@ The uncached fallback is a separate opt-in setting, `repair.uncached_recovery_fa
 For an existing installation:
 
 1. Record the current image digest and stop Decypharr before taking a consistent backup of its **entire `/app` data directory**, including configuration, authentication, job databases, and repair queue state. Preserve the old Compose file and image reference too.
-2. Keep your existing paths, mounts, and credentials. Change the service image to the selected fork digest, then run `docker compose pull` and `docker compose up -d` from that installation's directory. Run only one Decypharr instance against a data directory.
+2. Keep your existing paths, mounts, and credentials. Use `ghcr.io/ioeldev/decypharr:ioel-beta` as the service image, then run `docker compose pull` and `docker compose up -d` from that installation's directory. Run only one Decypharr instance against a data directory.
 3. Check logs, authentication, provider/Arr connections, mount access, and a detection-only audit before enabling further repair actions. Review existing recovery jobs: persisted work can resume independently of the audit schedule.
 
 This preview introduces persisted recovery states, including cache-rejection and uncached-recovery records, that older builds may not understand. **Rollback requires the old image and its matching pre-upgrade data snapshot**, not just switching the image back. Stop Decypharr before restoring the snapshot. Restoring local state does not undo Arr/provider operations already performed; reconcile those before restarting recovery. Compatibility with every upstream configuration and external API consumer has not been established.
+
+The `ioel-beta` tag moves as new branch builds are published. Updates take effect when you pull and recreate the container. To stay on a specific build, use its unique tag or digest from the [image build workflow](https://github.com/ioeldev/decypharr/actions/workflows/ghcr-manual.yml) summary. Manual builds of other refs or upstream source do not update `ioel-beta`.
 
 ## Documentation and feedback
 
