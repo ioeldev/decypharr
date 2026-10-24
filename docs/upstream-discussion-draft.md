@@ -1,39 +1,42 @@
-# Discussion draft: React UI and library audit/recovery work in an independent fork
+# React UI and library audit/recovery improvements — interested in upstream contributions?
 
-Suggested venue: [Decypharr Discussions](https://github.com/sirrobot01/decypharr/discussions). This is an unpublished draft for review.
+Hi @sirrobot01, thanks for building Decypharr!
 
----
+I've been extending it for my setup, mainly to detect broken library symlinks and recover media through Sonarr/Radarr. That work grew into several backend improvements and a React UI, so I wanted to discuss the direction before opening PRs.
 
-Hi @sirrobot01, thanks for building Decypharr. I've been extending it for my own setup, and the work has grown into a substantial fork. Before opening large PRs, I'd like to ask which parts, if any, fit your plans for upstream.
+The changes are in [ioeldev/decypharr on ioel/beta](https://github.com/ioeldev/decypharr/tree/ioel/beta). The main additions are:
 
-The fork is **Decypharr — ioel fork**, with development on [ioeldev/decypharr, branch ioel/beta](https://github.com/ioeldev/decypharr/tree/ioel/beta). I'm preparing it as an independently maintained public preview, with its own image and support, while keeping upstream attribution clear.
+- **Library read audits:** check imported Sonarr/Radarr files through their actual library paths, including symlinks whose original torrent is no longer tracked. Supports scheduled full audits and persistent findings with recheck and repair controls.
+- **Recovery queue:** persistent jobs and retries, dispatch pacing, concurrency limits, pause/resume, and visibility into downloads, imports, and confirmed readability.
+- **Season-aware recovery:** prefer Sonarr season packs with episode fallback, plus optional whole-season replacement.
+- **Cache recovery:** handle explicit cache rejections and optionally fall back to uncached downloads on supported providers.
+- **React UI:** replaces the Go templates with React/Vite, with responsive layouts and updated repair views. Production assets remain embedded in the Go binary; no separate frontend service is needed.
 
-## What changed
+This is preview work. Audits sample-read files rather than validating complete media, and repair actions can replace files through Arr. The frontend also changes the build pipeline, so I'd treat it separately from the backend contributions.
 
-**Frontend:** I replaced the Go HTML templates and existing browser scripts with React, Vite, TypeScript, and shadcn components. The interface covers setup/authentication, downloads, browsing, repair/recovery, statistics, and settings, with responsive navigation and light/dark themes. TanStack Query handles server state. Production assets remain embedded in the Go binary and served by Go; Bun is needed during the build, with no additional frontend service in deployment.
+**Would any of these changes fit your plans for Decypharr?** In particular, I'd be interested in your thoughts on library auditing/recovery independently of the React migration.
 
-**Library audits and repair:** The fork can enumerate imported Sonarr/Radarr files and sample-read their actual library paths, including symlinks whose original torrent is no longer tracked by Decypharr. It adds scheduled full audits, persistent incident tracking, and per-incident recheck, repair, retry, and suspend/resume controls. These checks validate a 64 KiB sample, not an entire media file, and depend on matching container paths and working mounts.
+For anything you'd like upstream, I can work toward focused PRs with the relevant tests and documentation. Which area and target branch would you prefer starting with?
 
-**Recovery:** I've added durable repair dispatch controls, bounded concurrent searches, batch cooldowns, active-job limits, pause/resume, and persisted retries. Sonarr recovery prefers season packs with episode fallback, with an optional whole-season replacement mode. The UI separates recovery submission, download/import progress, and confirmed library readability.
+I'm maintaining the preview as **Decypharr — ioel fork**, with separate builds and issue reporting, while keeping the upstream attribution clear. The [README](https://github.com/ioeldev/decypharr/blob/ioel/beta/README.md) includes installation instructions, and the [repair guide](https://github.com/ioeldev/decypharr/blob/ioel/beta/docs/src/content/docs/guides/repair.mdx) describes the audit/recovery behavior.
 
-**Provider/cache behavior:** Recovery recognizes explicit cache rejections and tries eligible alternatives or schedules a retry. There's also an opt-in uncached fallback for Real-Debrid, TorBox, and AllDebrid, with capacity limits, progress observation, and stall handling.
+Thanks for your thoughts!
 
-The [fork README](https://github.com/ioeldev/decypharr/blob/ioel/beta/README.md) covers installation and preview limitations. The [repair guide](https://github.com/ioeldev/decypharr/blob/ioel/beta/docs/src/content/docs/guides/repair.mdx) describes the audit/recovery behavior in more detail.
+### Screenshots
 
-## Scope and compatibility
+These are from my running setup, taken at different times.
 
-This is a frontend architecture change plus several backend features, so it would require a substantial review and ongoing maintenance commitment. The React migration also changes the build pipeline, GUI routing, and server endpoints used by the interface. I haven't established compatibility with every existing setup or external API consumer.
+**Health checks and recovery overview**
 
-The backend work includes tests for audit behavior, queue/recovery policies, cache rejections, and provider recovery. The frontend includes unit tests and browser smoke tests; the smoke tests use mocked API responses and are not proof of live provider/Arr compatibility.
+![Library health, recovery queue, and broken entries](images/fork-preview/health-checks.png)
 
-Repair actions can mutate Arr library state and request replacement downloads, including optional whole-season replacement. New persisted recovery states mean older builds may need a matching pre-upgrade data backup for rollback. I want those implications to be explicit before proposing anything for upstream.
+**Library findings and recovery status**
 
-## What would be useful upstream?
+![Library findings grouped by series and season, with recovery status](images/fork-preview/library-findings.png)
 
-1. Are you interested in a React-based interface, or do you prefer keeping the current template approach?
-2. Independently of the interface, would library read audits, repair queue controls, season-aware recovery, or cache/provider recovery fixes be useful?
-3. For anything you're interested in, what boundaries and target branch would you prefer for focused PRs?
+<details>
+<summary>Recovery jobs</summary>
 
-I can prepare focused proposals for the parts that fit, with their dependencies and validation made clear. I understand if the broader direction doesn't match your plans; in that case I'll keep maintaining it as a clearly identified fork. There's no expectation that you take ownership of the whole branch.
+![Recovery jobs with queue progress and imported replacements](images/fork-preview/recovery-jobs.png)
 
-Thanks again for the foundation, and I'd appreciate your thoughts before I spend time packaging this into upstream PRs.
+</details>
